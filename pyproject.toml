@@ -1,0 +1,13 @@
+[project]
+name = "alpha-code"
+version = "1.0.0"
+description = "Alpha Code — Standalone terminal agent"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+    "duckduckgo-search>=6.0",
+]
+
+[project.scripts]
+alpha = "main:main"

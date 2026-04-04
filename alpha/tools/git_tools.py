@@ -1,0 +1,379 @@
+"""Git operations tool for ALPHA agent.
+
+Provides safe, structured git operations within the workspace.
+
+SECURITY: Only operates within AGENT_WORKSPACE. Destructive operations
+(push, reset, clean) require approval. Read operations are safe.
+"""
+
+import asyncio
+import logging
+import shlex
+from pathlib import Path
+
+from . import ToolDefinition, ToolSafety, register_tool
+from .safe_env import get_safe_env
+from .workspace import AGENT_WORKSPACE
+
+logger = logging.getLogger(__name__)
+
+# Whitelist de flags permitidas por action
+_ALLOWED_GIT_FLAGS = {
+    "diff": {"--stat", "--name-only", "--cached", "--staged", "--shortstat", "--no-color"},
+    "log": {
+        "--oneline",
+        "--graph",
+        "--all",
+        "-n",
+        "--format",
+        "--since",
+        "--author",
+        "--pretty",
+        "--abbrev-commit",
+        "--no-color",
+    },
+    "show": {"--stat", "--no-color", "--format", "--pretty"},
+    "push": {"--set-upstream", "-u", "--tags"},
+    "reset": {"--soft", "--mixed"},  # --hard requer aprovação via _needs_approval
+}
+
+# Flags globalmente bloqueadas (escape do workspace / configuração)
+_BLOCKED_GIT_FLAGS = frozenset({"--no-index", "--work-tree", "--git-dir", "-C", "--file"})
+
+# Read-only git actions (SAFE)
+_SAFE_ACTIONS = frozenset(
+    {
+        "status",
+        "diff",
+        "log",
+        "branch",
+        "show",
+        "blame",
+        "stash_list",
+        "remote",
+        "tag",
+    }
+)
+
+# Write/mutating git actions (DESTRUCTIVE)
+_DESTRUCTIVE_ACTIONS = frozenset(
+    {
+        "add",
+        "commit",
+        "checkout",
+        "stash",
+        "stash_pop",
+        "pull",
+        "push",
+        "merge",
+        "rebase",
+        "reset",
+        "clean",
+        "branch_create",
+        "branch_delete",
+        "tag_create",
+    }
+)
+
+_ALL_ACTIONS = _SAFE_ACTIONS | _DESTRUCTIVE_ACTIONS
+
+
+async def _run_git(args: list[str], cwd: str, timeout: int | None = None) -> dict:
+    """Run a git command and return result."""
+    from ..config import TOOL_TIMEOUTS
+    if timeout is None:
+        timeout = TOOL_TIMEOUTS.get("git", 30)
+    cmd = ["git"] + args
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=cwd,
+            env=get_safe_env(),
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return {"error": f"git excedeu timeout de {timeout}s", "timeout": True}
+
+        return {
+            "exit_code": proc.returncode,
+            "stdout": stdout.decode(errors="replace")[:15000],
+            "stderr": stderr.decode(errors="replace")[:3000],
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _find_git_repo(path: str) -> str | None:
+    """Walk up from path to find .git directory. Returns repo root or None."""
+    p = Path(path).resolve()
+    while p != p.parent:
+        if (p / ".git").exists():
+            return str(p)
+        p = p.parent
+    return None
+
+
+def _sanitize_git_args(action: str, args: str) -> tuple[list[str], str | None]:
+    """Valida e sanitiza args git. Retorna (args_limpos, erro_ou_None)."""
+    if not args:
+        return [], None
+
+    try:
+        parts = shlex.split(args)
+    except ValueError:
+        return [], "Args malformados"
+
+    for part in parts:
+        # Bloquear flags globalmente perigosas (match exato ou prefixo com =)
+        for blocked in _BLOCKED_GIT_FLAGS:
+            if part == blocked or part.startswith(f"{blocked}=") or part.startswith(f"{blocked}/"):
+                return [], f"Flag '{blocked}' bloqueada por segurança"
+        # Bloquear force push via +refspec
+        if part.startswith("+") and action == "push":
+            return [], "Force push via +refspec bloqueado"
+
+    # Block dangerous format string expansions (can execute hooks)
+    import re as _re
+
+    _DANGEROUS_FMT = _re.compile(
+        r"%\((if|then|else|end|contents:signature|trailers)\)", _re.IGNORECASE
+    )
+    for part in parts:
+        if part.startswith("--format=") or part.startswith("--pretty="):
+            fmt_value = part.split("=", 1)[1]
+            if _DANGEROUS_FMT.search(fmt_value):
+                return [], f"Format string com expansões perigosas bloqueada: '{part[:50]}'"
+
+    # Se a action tem whitelist, validar flags
+    allowed = _ALLOWED_GIT_FLAGS.get(action)
+    if allowed is not None:
+        for part in parts:
+            if part.startswith("-"):
+                # Permitir flags numéricas como -20 para log
+                if part.lstrip("-").isdigit():
+                    continue
+                # Allow --format=... and --pretty=... (already validated above)
+                flag_base = part.split("=")[0]
+                if flag_base in ("--format", "--pretty") and "=" in part:
+                    if flag_base in allowed:
+                        continue
+                if part not in allowed:
+                    return [], f"Flag '{part}' não permitida para git {action}"
+
+    return parts, None
+
+
+async def _git_operation(
+    action: str,
+    path: str = None,
+    message: str = None,
+    branch: str = None,
+    files: list = None,
+    args: str = None,
+) -> dict:
+    """Execute a structured git operation."""
+    action = action.lower().strip()
+
+    if action not in _ALL_ACTIONS:
+        return {
+            "error": f"Ação git '{action}' não reconhecida. "
+            f"Ações disponíveis: {', '.join(sorted(_ALL_ACTIONS))}",
+        }
+
+    # Resolve repo path
+    if path:
+        repo_path = Path(path).expanduser().resolve()
+        try:
+            repo_path.relative_to(AGENT_WORKSPACE)
+        except ValueError:
+            return {"error": f"Path fora do workspace permitido ({AGENT_WORKSPACE})"}
+        cwd = str(repo_path)
+    else:
+        cwd = str(AGENT_WORKSPACE)
+
+    # Find git repo
+    repo_root = _find_git_repo(cwd)
+    if not repo_root:
+        return {"error": f"Nenhum repositório git encontrado em {cwd} ou diretórios pais"}
+
+    cwd = repo_root
+
+    # Route to specific action
+    if action == "status":
+        return await _run_git(["status", "--porcelain", "-b"], cwd)
+
+    elif action == "diff":
+        extra, err = _sanitize_git_args("diff", args)
+        if err:
+            return {"error": err}
+        return await _run_git(["diff"] + extra, cwd)
+
+    elif action == "log":
+        extra, err = _sanitize_git_args("log", args)
+        if err:
+            return {"error": err}
+        if not extra:
+            extra = ["--oneline", "-20"]
+        return await _run_git(["log"] + extra, cwd)
+
+    elif action == "branch":
+        return await _run_git(["branch", "-a", "-v"], cwd)
+
+    elif action == "show":
+        extra, err = _sanitize_git_args("show", args)
+        if err:
+            return {"error": err}
+        ref = extra[0] if extra else "HEAD"
+        return await _run_git(["show", "--stat", ref], cwd)
+
+    elif action == "blame":
+        if not files:
+            return {"error": "blame requer 'files' com pelo menos um arquivo"}
+        return await _run_git(["blame", "--porcelain", files[0]], cwd, timeout=60)
+
+    elif action == "stash_list":
+        return await _run_git(["stash", "list"], cwd)
+
+    elif action == "remote":
+        return await _run_git(["remote", "-v"], cwd)
+
+    elif action == "tag":
+        return await _run_git(["tag", "-l", "--sort=-creatordate"], cwd)
+
+    elif action == "add":
+        targets = files if files else ["."]
+        return await _run_git(["add"] + targets, cwd)
+
+    elif action == "commit":
+        if not message:
+            return {"error": "commit requer 'message'"}
+        return await _run_git(["commit", "-m", message], cwd)
+
+    elif action == "checkout":
+        if not branch:
+            return {"error": "checkout requer 'branch'"}
+        return await _run_git(["checkout", branch], cwd)
+
+    elif action == "branch_create":
+        if not branch:
+            return {"error": "branch_create requer 'branch'"}
+        return await _run_git(["checkout", "-b", branch], cwd)
+
+    elif action == "branch_delete":
+        if not branch:
+            return {"error": "branch_delete requer 'branch'"}
+        if branch in ("main", "master"):
+            return {"error": "Não é permitido deletar branch main/master"}
+        return await _run_git(["branch", "-d", branch], cwd)
+
+    elif action == "stash":
+        msg = ["-m", message] if message else []
+        return await _run_git(["stash", "push"] + msg, cwd)
+
+    elif action == "stash_pop":
+        return await _run_git(["stash", "pop"], cwd)
+
+    elif action == "pull":
+        return await _run_git(["pull", "--rebase"], cwd, timeout=60)
+
+    elif action == "push":
+        extra, err = _sanitize_git_args("push", args)
+        if err:
+            return {"error": err}
+        # Block force push to main/master
+        if "--force" in extra or "-f" in extra:
+            result = await _run_git(["branch", "--show-current"], cwd)
+            current = result.get("stdout", "").strip()
+            if current in ("main", "master"):
+                return {"error": "Force push para main/master não é permitido"}
+        return await _run_git(["push"] + extra, cwd, timeout=60)
+
+    elif action == "merge":
+        if not branch:
+            return {"error": "merge requer 'branch'"}
+        return await _run_git(["merge", branch], cwd)
+
+    elif action == "rebase":
+        if not branch:
+            return {"error": "rebase requer 'branch'"}
+        return await _run_git(["rebase", branch], cwd)
+
+    elif action == "reset":
+        extra, err = _sanitize_git_args("reset", args)
+        if err:
+            return {"error": err}
+        if not extra:
+            extra = ["--mixed", "HEAD~1"]
+        return await _run_git(["reset"] + extra, cwd)
+
+    elif action == "clean":
+        return await _run_git(["clean", "-fd"], cwd)
+
+    elif action == "tag_create":
+        if not args:
+            return {"error": "tag_create requer 'args' com o nome da tag"}
+        tag_args, err = _sanitize_git_args("tag_create", args)
+        if err:
+            return {"error": err}
+        if not tag_args:
+            return {"error": "tag_create requer pelo menos o nome da tag"}
+        if message:
+            return await _run_git(["tag", "-a", tag_args[0], "-m", message], cwd)
+        return await _run_git(["tag"] + tag_args, cwd)
+
+    return {"error": f"Ação '{action}' não implementada"}
+
+
+# Register safe version (read-only operations)
+register_tool(
+    ToolDefinition(
+        name="git_operation",
+        description=(
+            "Executar operações git de forma segura e estruturada. "
+            "Ações de leitura: status, diff, log, branch, show, blame, stash_list, remote, tag. "
+            "Ações de escrita: add, commit, checkout, branch_create, branch_delete, stash, "
+            "stash_pop, pull, push, merge, rebase, reset, clean, tag_create. "
+            "Force push em main/master é bloqueado."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "Ação git a executar",
+                    "enum": sorted(_ALL_ACTIONS),
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Caminho do repositório (opcional, usa workspace padrão)",
+                },
+                "message": {
+                    "type": "string",
+                    "description": "Mensagem para commit, stash ou tag",
+                },
+                "branch": {
+                    "type": "string",
+                    "description": "Nome da branch (para checkout, merge, rebase, branch_create, branch_delete)",
+                },
+                "files": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Lista de arquivos (para add, blame)",
+                },
+                "args": {
+                    "type": "string",
+                    "description": "Argumentos extras como string (para diff, log, push, reset, show, tag_create)",
+                },
+            },
+            "required": ["action"],
+        },
+        safety=ToolSafety.DESTRUCTIVE,
+        category="git",
+        executor=_git_operation,
+    )
+)
