@@ -7,7 +7,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+# Load .env from project root (not CWD) so `alpha` works from any directory
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(_PROJECT_ROOT / ".env", override=True)
 
 # ─── Defaults ───
 
@@ -105,8 +107,8 @@ AGENT_WORKSPACE = os.getenv("AGENT_WORKSPACE", "")
 # ─── Feature Flags (used by tool modules) ───
 FEATURES: dict = {
     "sandbox_enabled": False,
-    "multi_agent_enabled": False,
-    "delegate_tool_enabled": False,
+    "multi_agent_enabled": True,
+    "delegate_tool_enabled": True,
     "auto_delegate_parallel_groups": False,
     "max_parallel_agents": 3,
     "subagent_max_iterations": 15,
@@ -123,4 +125,18 @@ TOOL_TIMEOUTS: dict = {
     "network": 30,
     "pipeline": 120,
     "database": 30,
+    "browser": 180,
 }
+
+# ─── Browser tool policies ───
+# Comma-separated env vars; empty list means "no restrictions".
+BROWSER_DOMAIN_ALLOWLIST: list[str] = [
+    d.strip().lower()
+    for d in os.getenv("ALPHA_BROWSER_ALLOWLIST", "").split(",")
+    if d.strip()
+]
+BROWSER_DOMAIN_BLOCKLIST: list[str] = [
+    d.strip().lower()
+    for d in os.getenv("ALPHA_BROWSER_BLOCKLIST", "").split(",")
+    if d.strip()
+]

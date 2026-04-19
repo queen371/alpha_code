@@ -2,22 +2,160 @@
 Core agent loop for Alpha Code.
 
 Simplified autonomous engine: LLM call -> tool detection -> approval -> execution.
-No perception, planning, delegation, or self-reflection phases.
+Includes intelligent context compression, token tracking, and smart loop detection.
 """
 
 import json
 import logging
 from collections.abc import AsyncGenerator
+from difflib import SequenceMatcher
 
 from .approval import needs_approval
 from .config import MAX_ITERATIONS
+from .context import (
+    compress_context,
+    estimate_messages_tokens,
+    get_context_limit,
+    needs_compression,
+)
 from .executor import build_assistant_tool_message, execute_tool_calls
 from .llm import stream_chat_with_tools
 
 logger = logging.getLogger(__name__)
 
-# Loop detection: break if same call repeated N times
-_MAX_REPEAT_CALLS = 3
+# ─── Loop detection config ───
+_MAX_REPEAT_CALLS = 3        # exact same call N times → loop
+_SIMILAR_REPEAT_CALLS = 5    # similar calls threshold (higher to avoid false positives)
+_SIMILARITY_THRESHOLD = 0.92  # fuzzy match threshold for "similar" calls
+_CYCLE_WINDOW = 20            # look-back window for cycle detection
+_STALE_WINDOW = 6             # if last N tool calls produced no new info → stale
+
+
+def _call_signature(tc: dict) -> str:
+    """Create a comparable signature from a tool call."""
+    return f"{tc['name']}:{tc['arguments']}"
+
+
+def _parse_args_values(args_str: str) -> list[str]:
+    """Extract individual argument values from JSON args for comparison."""
+    try:
+        args = json.loads(args_str)
+        if isinstance(args, dict):
+            return [str(v) for v in args.values()]
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return [args_str]
+
+
+def _are_similar(sig_a: str, sig_b: str) -> bool:
+    """Check if two call signatures are similar (same tool, same effective args).
+
+    Compares individual argument values instead of the raw JSON string,
+    which avoids false positives from long shared path prefixes.
+    """
+    name_a, _, args_a = sig_a.partition(":")
+    name_b, _, args_b = sig_b.partition(":")
+    if name_a != name_b:
+        return False
+    if args_a == args_b:
+        return True
+
+    # Parse and compare individual argument values
+    vals_a = _parse_args_values(args_a)
+    vals_b = _parse_args_values(args_b)
+
+    if len(vals_a) != len(vals_b):
+        return False
+
+    # All values must be similar for calls to be considered similar
+    for va, vb in zip(vals_a, vals_b):
+        if va == vb:
+            continue
+        ratio = SequenceMatcher(None, va[:300], vb[:300]).ratio()
+        if ratio < _SIMILARITY_THRESHOLD:
+            return False
+    return True
+
+
+def _detect_cycle(calls: list[str]) -> bool:
+    """Detect A→B→A→B style cycles in recent calls.
+
+    Uses EXACT match only (not fuzzy) to avoid false positives with tools
+    like execute_shell where different commands share similar structure.
+    Requires at least 3 full cycle repetitions to confirm.
+    """
+    if len(calls) < 6:
+        return False
+    # Check for cycles of length 2 and 3, requiring 3 repetitions
+    for cycle_len in (2, 3):
+        needed = cycle_len * 3  # 3 full cycles
+        if len(calls) < needed:
+            continue
+        recent = calls[-needed:]
+        # Check if all 3 cycles are identical
+        cycle = recent[:cycle_len]
+        is_cycle = True
+        for rep in range(1, 3):
+            segment = recent[rep * cycle_len : (rep + 1) * cycle_len]
+            if segment != cycle:
+                is_cycle = False
+                break
+        if is_cycle:
+            return True
+    return False
+
+
+def _detect_stale_progress(
+    recent_results: list[str], window: int = _STALE_WINDOW
+) -> bool:
+    """Check if recent tool results are all very similar (no new info)."""
+    if len(recent_results) < window:
+        return False
+    last_n = recent_results[-window:]
+    # If all results are very similar to the first one, we're stale
+    base = last_n[0][:500]
+    similar_count = sum(
+        1 for r in last_n[1:]
+        if SequenceMatcher(None, base, r[:500]).ratio() > 0.90
+    )
+    return similar_count >= window - 2  # allow 1 different result
+
+
+def _detect_loop(
+    call_sigs: list[str],
+    recent_calls: list[str],
+    recent_results: list[str],
+) -> str | None:
+    """
+    Smart loop detection. Returns a reason string if loop detected, None otherwise.
+
+    Detects:
+    1. Exact repetition (same call N times)
+    2. Similar calls (same tool, similar args N times)
+    3. A→B→A→B cycles
+    4. Stale progress (results not changing)
+    """
+    # 1. Exact repetition
+    for sig in call_sigs:
+        count = recent_calls.count(sig)
+        if count >= _MAX_REPEAT_CALLS:
+            return f"exact repeat: '{sig[:60]}' called {count}x"
+
+    # 2. Similar calls (same tool with slightly different args)
+    for sig in call_sigs:
+        similar_count = sum(1 for s in recent_calls if _are_similar(sig, s))
+        if similar_count >= _SIMILAR_REPEAT_CALLS:
+            return f"similar calls: '{sig[:60]}' ~{similar_count}x"
+
+    # 3. Cycle detection (A→B→A→B)
+    if _detect_cycle(recent_calls):
+        return "cycle detected in recent calls"
+
+    # 4. Stale progress
+    if _detect_stale_progress(recent_results):
+        return "stale progress — tool results not changing"
+
+    return None
 
 
 async def run_agent(
@@ -28,9 +166,15 @@ async def run_agent(
     get_tool_fn=None,
     tools: list[dict] | None = None,
     approval_callback=None,
+    max_iterations: int | None = None,
 ) -> AsyncGenerator[dict, None]:
     """
     Run the agent loop. Async generator yielding display events.
+
+    Features:
+    - Intelligent context compression via LLM summarization
+    - Token budget tracking per provider
+    - Smart loop detection (exact, fuzzy, cycle, stale)
 
     Args:
         messages: Full conversation messages (system + history + new user msg).
@@ -40,34 +184,46 @@ async def run_agent(
         get_tool_fn: Function(name) -> ToolDefinition for looking up tools.
         tools: OpenAI-format tool definitions list.
         approval_callback: Sync function(tool_name, args) -> bool for approval.
+        max_iterations: Override iteration limit (defaults to MAX_ITERATIONS).
 
     Yields:
         {"type": "token", "text": "..."}
         {"type": "tool_call", "name": ..., "args": ...}
         {"type": "tool_result", "name": ..., "result": ...}
         {"type": "approval_needed", "name": ..., "args": ...}
+        {"type": "context_compressed", "before": int, "after": int}
         {"type": "done", "reply": "full text"}
         {"type": "error", "message": "..."}
     """
     if tools is None:
         tools = []
 
+    iteration_limit = max_iterations if max_iterations is not None else MAX_ITERATIONS
     full_response = ""
 
-    # Track repeated tool calls to detect infinite loops
+    # Track tool calls for smart loop detection
     _recent_calls: list[str] = []
+    _recent_results: list[str] = []
 
-    for iteration in range(MAX_ITERATIONS):
-        logger.info(f"Agent iteration {iteration + 1}/{MAX_ITERATIONS}")
+    for iteration in range(iteration_limit):
+        logger.info(f"Agent iteration {iteration + 1}/{iteration_limit}")
 
-        # Truncate old tool results every 5 iterations to prevent unbounded growth
-        if iteration > 0 and iteration % 5 == 0:
-            cutoff = len(messages) - 6
-            for i, msg in enumerate(messages):
-                if i >= cutoff:
-                    break
-                if msg.get("role") == "tool" and len(msg.get("content", "")) > 500:
-                    msg["content"] = msg["content"][:500] + "\n... [truncated]"
+        # ── Context compression (replaces crude truncation) ──
+        if needs_compression(messages, provider):
+            tokens_before = estimate_messages_tokens(messages)
+            try:
+                await compress_context(messages, provider, stream_chat_with_tools)
+                tokens_after = estimate_messages_tokens(messages)
+                logger.info(
+                    f"Context compressed: {tokens_before} -> {tokens_after} tokens"
+                )
+                yield {
+                    "type": "context_compressed",
+                    "before": tokens_before,
+                    "after": tokens_after,
+                }
+            except Exception as e:
+                logger.warning(f"Context compression failed: {e} — continuing")
 
         # Stream LLM call
         final_event = None
@@ -97,35 +253,25 @@ async def run_agent(
             yield {"type": "done", "reply": full_response}
             return
 
-        # ── Loop detection ──
-        call_sigs = [
-            f"{tc['name']}:{tc['arguments']}" for tc in final_event["tool_calls"]
-        ]
-        for sig in call_sigs:
-            _recent_calls.append(sig)
-        if len(_recent_calls) > 50:
-            _recent_calls[:] = _recent_calls[-50:]
+        # ── Smart loop detection ──
+        call_sigs = [_call_signature(tc) for tc in final_event["tool_calls"]]
+        _recent_calls.extend(call_sigs)
+        if len(_recent_calls) > _CYCLE_WINDOW * 3:
+            _recent_calls[:] = _recent_calls[-_CYCLE_WINDOW * 3:]
 
-        # Check if same call appears N times in recent history
-        loop_detected = False
-        if len(_recent_calls) >= _MAX_REPEAT_CALLS:
-            for sig in call_sigs:
-                if _recent_calls.count(sig) >= _MAX_REPEAT_CALLS:
-                    logger.warning(
-                        f"Loop detected: '{sig[:80]}' called {_MAX_REPEAT_CALLS}x "
-                        f"— forcing text response at iteration {iteration + 1}"
-                    )
-                    loop_detected = True
-                    break
+        loop_reason = _detect_loop(call_sigs, _recent_calls, _recent_results)
 
-        if loop_detected:
-            # Inject nudge and do one more LLM call without tools
+        if loop_reason:
+            logger.warning(
+                f"Loop detected ({loop_reason}) at iteration {iteration + 1} "
+                f"— forcing final response"
+            )
             messages.append(
                 {
                     "role": "system",
                     "content": (
-                        "ATTENTION: You have called the same tool multiple times with the same "
-                        "arguments. STOP calling tools and produce your final response now "
+                        f"ATTENTION: Loop detected ({loop_reason}). "
+                        "STOP calling tools and produce your final response now "
                         "based on the data already collected. Synthesize ALL information from "
                         "previous calls into a complete response."
                     ),
@@ -137,7 +283,7 @@ async def run_agent(
                 if event["type"] == "content_token":
                     yield {"type": "token", "text": event["token"]}
                 elif event["type"] == "final":
-                    full_response = event.get("content", "")
+                    full_response += event.get("content", "")
 
             yield {"type": "done", "reply": full_response}
             return
@@ -149,14 +295,24 @@ async def run_agent(
             )
         )
 
-        async for event in execute_tool_calls(
-            final_event["tool_calls"],
-            messages,
-            needs_approval_fn=needs_approval,
-            approval_callback=approval_callback,
-            get_tool_fn=get_tool_fn,
-        ):
-            yield event
+        try:
+            async for event in execute_tool_calls(
+                final_event["tool_calls"],
+                messages,
+                needs_approval_fn=needs_approval,
+                approval_callback=approval_callback,
+                get_tool_fn=get_tool_fn,
+            ):
+                yield event
+                # Track tool results for stale progress detection
+                if event.get("type") == "tool_result":
+                    result = event.get("result", {})
+                    result_str = json.dumps(result, ensure_ascii=False, default=str)
+                    _recent_results.append(result_str[:500])
+        except Exception as e:
+            logger.error(f"Tool execution failed: {e}")
+            yield {"type": "error", "message": f"Tool execution failed: {e}"}
+            return
 
     # Max iterations reached
     yield {

@@ -27,10 +27,27 @@ AUTO_APPROVE_TOOLS = frozenset(
         "project_overview",
         "run_tests",
         "web_search",
+        # Browser read-only / navigation
+        "browser_open",
+        "browser_close",
+        "browser_status",
+        "browser_navigate",
+        "browser_back",
+        "browser_forward",
+        "browser_reload",
+        "browser_get_content",
+        "browser_screenshot",
+        "browser_describe_page",
+        "browser_query",
+        "browser_wait_for",
+        "browser_list_tabs",
+        "browser_new_tab",
+        "browser_switch_tab",
+        "browser_close_tab",
     }
 )
 
-REQUIRE_APPROVAL_TOOLS = frozenset({"install_package", "docker_run"})
+REQUIRE_APPROVAL_TOOLS = frozenset({"install_package", "docker_run", "delegate_task", "delegate_parallel"})
 
 # Shell commands safe for auto-approval (desktop control + read-only + dev tools)
 SAFE_SHELL_COMMANDS = frozenset(
@@ -57,9 +74,11 @@ SAFE_SHELL_COMMANDS = frozenset(
         "ip", "ss", "netstat", "route", "arp", "iwconfig", "ifconfig",
         # Networking info (read-only)
         "ping", "nslookup", "dig",
+        "ip", "route", "arp", "ifconfig", "iwconfig",
+        "hostname", "nmcli", "traceroute", "whois",
         # Filesystem read-only
         "ls", "cat", "head", "tail", "wc", "find", "file", "stat",
-        "tree", "grep", "sort", "uniq", "diff",
+        "tree", "grep", "sort", "uniq", "diff", "pwd",
         # Dev tools — build, test, lint, format
         "python", "python3", "node", "npm", "npx", "yarn", "pnpm", "bun",
         "pip", "pip3", "pytest", "vitest", "jest",
@@ -77,17 +96,23 @@ SAFE_SHELL_COMMANDS = frozenset(
 
 # Dangerous operators (subshells, redirection, variable expansion)
 # Pipes (|) are allowed if all commands in the pipeline are safe
-_DANGEROUS_OPS = re.compile(r"[;&`<>]|\$\(|&&|\|\||\$\{")
+_DANGEROUS_OPS = re.compile(r"[;&`<>\n\r]|\$\(|&&|\|\||\$\{")
 
 # Dangerous args per command (exfiltration / destructive writes)
 # V-001 FIX: validate individual args (not joined string)
 _DANGEROUS_ARGS = {
     "curl": re.compile(r"^-[dXoT]|^--data|^--output|^--upload-file|^--upload", re.I),
     "wget": re.compile(r"^-O|^--output-document|^--post-data|^--post-file", re.I),
-    "find": re.compile(r"^-exec$|^-delete$|^-execdir$", re.I),
+    "find": re.compile(r"^-delete$|^-execdir$", re.I),
     "nc": re.compile(r"^-[ec]|^--exec", re.I),
     "ncat": re.compile(r"^-[ec]|^--exec", re.I),
 }
+
+# Commands safe to use after find -exec (read-only / counting)
+_SAFE_EXEC_COMMANDS = frozenset({
+    "wc", "cat", "head", "tail", "grep", "file", "stat", "basename",
+    "dirname", "md5sum", "sha256sum", "sort", "uniq", "du",
+})
 
 # Git actions considered read-only (safe for auto-approval)
 _SAFE_GIT_ACTIONS = frozenset(
@@ -101,6 +126,29 @@ _SAFE_GIT_ACTIONS = frozenset(
 _AUTO_GIT_ACTIONS = frozenset(
     {"add", "commit", "checkout", "stash", "pull", "fetch"}
 )
+
+
+def _is_find_exec_safe(parts: list[str]) -> bool:
+    """Check if a find command with -exec uses only safe commands.
+
+    Allows: find ... -exec wc -l {} +
+    Blocks: find ... -exec rm {} ;
+    """
+    i = 0
+    while i < len(parts):
+        if parts[i] == "-exec":
+            # Next token after -exec is the command to execute
+            if i + 1 >= len(parts):
+                return False
+            exec_cmd = Path(parts[i + 1]).name
+            if exec_cmd not in _SAFE_EXEC_COMMANDS:
+                return False
+            # Skip past the -exec ... ; or -exec ... +
+            i += 2
+            while i < len(parts) and parts[i] not in (";", "+"):
+                i += 1
+        i += 1
+    return True
 
 
 def _is_single_command_safe(cmd_str: str) -> bool:
@@ -129,6 +177,11 @@ def _is_single_command_safe(cmd_str: str) -> bool:
                 if pattern.search(arg):
                     return False
 
+        # Special handling: find -exec with safe commands is OK
+        if base_cmd == "find" and "-exec" in parts:
+            if not _is_find_exec_safe(parts):
+                return False
+
         return True
     except ValueError:
         return False
@@ -156,6 +209,34 @@ def is_safe_shell_command(command: str) -> bool:
     return _is_single_command_safe(command)
 
 
+def _is_safe_pipeline(pipeline: str) -> bool:
+    """
+    Check if a pipeline string (with &&, ||, ;, |) is safe for auto-approval.
+
+    Unlike is_safe_shell_command (for execute_shell), this allows logical
+    operators (&&, ||, ;) as long as every individual command is safe.
+    Still blocks dangerous operators like backticks, $(), redirects.
+    """
+    # Block shell expansion / injection vectors (but NOT &&, ||, ;)
+    _PIPELINE_DANGEROUS = re.compile(r"[`<>]|\$\(|\$\{|\n|\r")
+    if _PIPELINE_DANGEROUS.search(pipeline):
+        return False
+
+    # Split by logical operators and pipes, validate each command
+    segments = re.split(r"\s*(?:&&|\|\||;|\|)\s*", pipeline)
+    for seg in segments:
+        seg = seg.strip()
+        if not seg:
+            continue
+        # Strip redirects for validation
+        cmd_part = re.split(r"\s*(?:>>?|2>>?|<)\s*", seg)[0].strip()
+        if not cmd_part:
+            continue
+        if not _is_single_command_safe(cmd_part):
+            return False
+    return True
+
+
 def needs_approval(tool_name: str, args: dict) -> bool:
     """
     Determine if a tool call needs user approval.
@@ -171,11 +252,19 @@ def needs_approval(tool_name: str, args: dict) -> bool:
     if tool_name in REQUIRE_APPROVAL_TOOLS:
         return True
 
-    # execute_shell / execute_pipeline: auto-approve safe commands
-    if tool_name in ("execute_shell", "execute_pipeline"):
-        command = args.get("command", args.get("pipeline", ""))
+    # execute_shell: auto-approve safe commands (no &&, ||, ;)
+    if tool_name == "execute_shell":
+        command = args.get("command", "")
         if is_safe_shell_command(command):
             logger.info(f"Auto-approve safe shell: {command[:80]}")
+            return False
+        return True
+
+    # execute_pipeline: auto-approve if all commands are safe (allows &&, ||, ;)
+    if tool_name == "execute_pipeline":
+        pipeline = args.get("pipeline", "")
+        if _is_safe_pipeline(pipeline):
+            logger.info(f"Auto-approve safe pipeline: {pipeline[:80]}")
             return False
         return True
 

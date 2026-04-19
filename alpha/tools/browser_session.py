@@ -1,0 +1,135 @@
+"""
+Persistent browser session for Alpha Code.
+
+Holds a single Playwright browser instance shared across all browser_* tools
+so cookies, login state, and tab history survive between tool calls.
+"""
+
+import asyncio
+import logging
+from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
+
+try:
+    from playwright.async_api import (
+        Browser,
+        BrowserContext,
+        Page,
+        Playwright,
+        async_playwright,
+    )
+
+    PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    PLAYWRIGHT_AVAILABLE = False
+    Browser = BrowserContext = Page = Playwright = None  # type: ignore
+
+
+_BLOCKED_SCHEMES = frozenset(
+    {"file", "chrome", "chrome-extension", "about", "javascript", "data", "view-source"}
+)
+
+
+class BrowserSession:
+    """Singleton Playwright session reused across tool calls."""
+
+    _instance: "BrowserSession | None" = None
+    _lock = asyncio.Lock()
+
+    def __init__(self):
+        self.playwright: "Playwright | None" = None
+        self.browser: "Browser | None" = None
+        self.context: "BrowserContext | None" = None
+        self.pages: list = []
+        self.active_idx: int = 0
+        self.headless: bool = True
+
+    @classmethod
+    async def get(cls) -> "BrowserSession":
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    @property
+    def page(self):
+        if not self.pages:
+            return None
+        if self.active_idx >= len(self.pages):
+            self.active_idx = 0
+        return self.pages[self.active_idx]
+
+    def is_open(self) -> bool:
+        return self.browser is not None and self.browser.is_connected()
+
+    async def open(self, headless: bool = True) -> None:
+        async with self._lock:
+            if self.is_open():
+                return
+            if not PLAYWRIGHT_AVAILABLE:
+                raise RuntimeError(
+                    "Playwright not installed. Run: "
+                    "pip install playwright && playwright install chromium"
+                )
+            self.headless = headless
+            self.playwright = await async_playwright().start()
+            self.browser = await self.playwright.chromium.launch(headless=headless)
+            self.context = await self.browser.new_context(
+                user_agent="ALPHA-Browser/1.0",
+                viewport={"width": 1280, "height": 800},
+                accept_downloads=False,
+                java_script_enabled=True,
+            )
+            page = await self.context.new_page()
+            self.pages = [page]
+            self.active_idx = 0
+            self.context.on("page", self._on_new_page)
+
+    def _on_new_page(self, page) -> None:
+        if page not in self.pages:
+            self.pages.append(page)
+
+    async def close(self) -> None:
+        async with self._lock:
+            if self.browser:
+                try:
+                    await self.browser.close()
+                except Exception as e:
+                    logger.warning(f"Error closing browser: {e}")
+            if self.playwright:
+                try:
+                    await self.playwright.stop()
+                except Exception as e:
+                    logger.warning(f"Error stopping playwright: {e}")
+            self.browser = None
+            self.context = None
+            self.playwright = None
+            self.pages = []
+            self.active_idx = 0
+
+
+def validate_browser_url(url: str) -> str | None:
+    """Returns error string if URL is unsafe, None if OK."""
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return "URL inválida"
+    scheme = (parsed.scheme or "").lower()
+    if scheme in _BLOCKED_SCHEMES:
+        return f"Esquema '{scheme}' bloqueado por segurança"
+    if scheme not in ("http", "https"):
+        return f"Esquema '{scheme}' não permitido (use http ou https)"
+    if not parsed.hostname:
+        return "URL sem hostname"
+    try:
+        from ..net_utils import validate_url as _validate
+
+        return _validate(url)
+    except Exception:
+        return None
+
+
+async def shutdown_browser() -> None:
+    """Cleanup hook called on application shutdown."""
+    if BrowserSession._instance is not None and BrowserSession._instance.is_open():
+        await BrowserSession._instance.close()

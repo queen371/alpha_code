@@ -8,6 +8,7 @@ SECURITY: Each step in a composite tool uses the existing tool security model.
 
 import asyncio
 import logging
+import re
 from pathlib import Path
 
 from . import ToolDefinition, ToolSafety, get_tool, register_tool
@@ -169,17 +170,17 @@ async def _search_and_replace(
         return {"error": f"Path fora do workspace permitido ({AGENT_WORKSPACE})"}
 
     # Find files with matches
-    search_result = await _run_tool("search_files", path=str(target_path), query=search)
+    search_result = await _run_tool("search_files", path=str(target_path), pattern=re.escape(search))
     if "error" in search_result:
         return search_result
 
-    matches = search_result.get("matches", [])
-    if not matches:
+    results_list = search_result.get("results", [])
+    if not results_list:
         return {"matches": 0, "message": f"Nenhuma ocorrência de '{search}' encontrada"}
 
     # Group by file
     files_to_change = {}
-    for match in matches:
+    for match in results_list:
         filepath = match.get("file", match.get("path", ""))
         if filepath:
             if filepath not in files_to_change:
@@ -197,30 +198,28 @@ async def _search_and_replace(
             "message": "Execute com dry_run=false para aplicar as mudanças",
         }
 
-    # Apply replacements
+    # Apply replacements via edit_file (enforces workspace + symlink validation)
+    # edit_file replaces one occurrence at a time, so loop until no more matches
     changed_files = []
     errors = []
+    _MAX_REPLACEMENTS_PER_FILE = 500  # safety limit
 
     for filepath in files_to_change:
-        filepath_obj = Path(filepath)
-        try:
-            content = filepath_obj.read_text(encoding="utf-8")
-        except Exception as e:
-            errors.append({"file": filepath, "error": str(e)})
-            continue
-
-        new_content = content.replace(search, replace)
-
-        if content != new_content:
-            try:
-                filepath_obj.write_text(new_content, encoding="utf-8")
-                changed_files.append(filepath)
-            except Exception as e:
-                errors.append({"file": filepath, "error": str(e)})
+        file_replaced = 0
+        for _ in range(_MAX_REPLACEMENTS_PER_FILE):
+            result = await _run_tool("edit_file", path=filepath, old_text=search, new_text=replace)
+            if "error" in result:
+                if file_replaced == 0:
+                    errors.append({"file": filepath, "error": result["error"]})
+                break  # no more occurrences (or real error on first try)
+            file_replaced += result.get("replaced", 1)
+        if file_replaced > 0:
+            changed_files.append({"file": filepath, "replacements": file_replaced})
 
     return {
         "dry_run": False,
         "files_changed": len(changed_files),
+        "total_replacements": sum(f["replacements"] for f in changed_files),
         "changed": changed_files,
         "errors": errors if errors else None,
         "search": search,

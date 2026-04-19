@@ -38,9 +38,9 @@ def _validate_pipeline(pipeline: str) -> str | None:
     if _SHELL_EXPANSION_RE.search(pipeline):
         return "Pipeline bloqueado: expansão de variáveis/comandos ($(), ``, ${}) não é permitida"
 
-    # Check hard-blocked patterns on the full string first
+    # Check hard-blocked patterns on the full string first (pre-compiled)
     for pattern in HARD_BLOCKED:
-        if re.search(pattern, pipeline, re.IGNORECASE):
+        if pattern.search(pipeline):
             return "Pipeline bloqueado por segurança (padrão perigoso detectado)"
 
     # Split by pipe/logical operators and validate each command
@@ -258,6 +258,7 @@ async def _execute_pipeline(pipeline: str, cwd: str = None, timeout: int | None 
         last_exit_code = 0
 
         i = 0
+        skip_next = False
         while i < len(logical_segments):
             part = logical_segments[i].strip()
             i += 1
@@ -267,8 +268,18 @@ async def _execute_pipeline(pipeline: str, cwd: str = None, timeout: int | None 
 
             # É um operador lógico?
             if part in ("&&", "||", ";"):
-                if (part == "&&" and last_exit_code != 0) or (part == "||" and last_exit_code == 0):
-                    break
+                if part == ";":
+                    # Unconditional separator — always continue
+                    skip_next = False
+                elif (part == "&&" and last_exit_code != 0) or (part == "||" and last_exit_code == 0):
+                    # Short-circuit: skip the NEXT command only
+                    skip_next = True
+                else:
+                    skip_next = False
+                continue
+
+            if skip_next:
+                skip_next = False
                 continue
 
             # É um pipe chain: cmd1 | cmd2 | cmd3

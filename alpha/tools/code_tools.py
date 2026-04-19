@@ -1,7 +1,9 @@
 """Code execution tools for ALPHA agent.
 
 SECURITY: A static import blocklist prevents the most dangerous escape vectors
-(os, subprocess, shutil, etc.). Single-user only.
+(os, subprocess, shutil, etc.) and project dependencies that enable network
+exfiltration (httpx, aiohttp, requests, duckduckgo_search).
+The blocklist is best-effort — NOT a real sandbox. Single-user only.
 """
 
 import asyncio
@@ -57,6 +59,19 @@ _BLOCKED_IMPORT_PATTERNS = [
     r"\bfrom\s+http\b",
     r"\bimport\s+urllib\b",
     r"\bfrom\s+urllib\b",
+    # Block project dependencies (network exfiltration vectors)
+    r"\bimport\s+httpx\b",
+    r"\bfrom\s+httpx\b",
+    r"\bimport\s+requests\b",
+    r"\bfrom\s+requests\b",
+    r"\bimport\s+aiohttp\b",
+    r"\bfrom\s+aiohttp\b",
+    r"\bimport\s+duckduckgo_search\b",
+    r"\bfrom\s+duckduckgo_search\b",
+    r"\bimport\s+ddgs\b",
+    r"\bfrom\s+ddgs\b",
+    r"\bimport\s+dotenv\b",
+    r"\bfrom\s+dotenv\b",
     r"\b__import__\s*\(",
     r"\beval\s*\(",
     r"\bexec\s*\(",

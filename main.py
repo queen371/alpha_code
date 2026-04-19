@@ -10,6 +10,7 @@ Usage:
 
 import argparse
 import asyncio
+import atexit
 import json
 import os
 import sys
@@ -21,10 +22,22 @@ from alpha.display import (
     c,
     print_approval_request,
     print_banner,
+    print_context_compressed,
     print_error,
     print_phase,
+    print_sessions_list,
     print_tool_call,
     print_tool_result,
+    print_tools_list,
+    reset_approve_all,
+)
+from alpha.history import (
+    generate_session_id,
+    get_last_session_id,
+    list_sessions,
+    load_session,
+    load_session_summary,
+    save_session,
 )
 
 
@@ -44,6 +57,19 @@ def _get_tools():
 def _approval_callback(tool_name: str, args: dict) -> bool:
     """Synchronous approval callback for the REPL."""
     return print_approval_request(tool_name, args)
+
+
+def _shutdown_browser_session():
+    """atexit hook: close any persistent browser session."""
+    try:
+        from alpha.tools.browser_session import shutdown_browser
+
+        asyncio.run(shutdown_browser())
+    except Exception:
+        pass
+
+
+atexit.register(_shutdown_browser_session)
 
 
 async def _run_once(messages, user_message, provider, temperature, get_tool_fn, tools):
@@ -70,7 +96,7 @@ async def _run_once(messages, user_message, provider, temperature, get_tool_fn, 
             full_reply += text
 
         elif event_type == "tool_call":
-            print_tool_call(event["name"], event.get("args", {}))
+            print_tool_call(event["name"], event.get("args", {}), event.get("safety", "safe"))
 
         elif event_type == "tool_result":
             print_tool_result(event["name"], event.get("result", {}))
@@ -78,6 +104,9 @@ async def _run_once(messages, user_message, provider, temperature, get_tool_fn, 
         elif event_type == "approval_needed":
             # Approval is handled inside executor via callback
             pass
+
+        elif event_type == "context_compressed":
+            print_context_compressed(event.get("before", 0), event.get("after", 0))
 
         elif event_type == "done":
             reply = event.get("reply", "")
@@ -102,6 +131,7 @@ def run_repl(provider: str, temperature: float):
     system_prompt = load_system_prompt()
     messages = [{"role": "system", "content": system_prompt}]
     history = []
+    session_id = generate_session_id()
 
     get_tool_fn, tools = _get_tools()
 
@@ -115,7 +145,11 @@ def run_repl(provider: str, temperature: float):
             prompt = f"{c(C.GREEN + C.BOLD, '❯')} "
             user_input = input(prompt).strip()
         except (KeyboardInterrupt, EOFError):
-            print(f"\n{c(C.GRAY, 'Goodbye.')}")
+            # Auto-save on exit
+            if len(messages) > 1:
+                save_session(session_id, messages, {"provider": provider, "model": cfg["model"]})
+                print(f"\n  {c(C.GRAY, f'Session saved: {session_id}')}")
+            print(f"{c(C.GRAY, 'Goodbye.')}")
             break
 
         if not user_input:
@@ -123,13 +157,19 @@ def run_repl(provider: str, temperature: float):
 
         # Commands
         if user_input.startswith("/"):
-            cmd = user_input.lower().split()[0]
+            parts = user_input.split()
+            cmd = parts[0].lower()
             if cmd in ("/exit", "/quit", "/q"):
+                if len(messages) > 1:
+                    save_session(session_id, messages, {"provider": provider, "model": cfg["model"]})
+                    print(f"  {c(C.GRAY, f'Session saved: {session_id}')}")
                 print(c(C.GRAY, "Goodbye."))
                 break
             elif cmd == "/clear":
                 history.clear()
                 messages[:] = [{"role": "system", "content": system_prompt}]
+                session_id = generate_session_id()
+                reset_approve_all()
                 os.system("clear" if os.name != "nt" else "cls")
                 print_banner(provider, cfg["model"])
                 continue
@@ -143,20 +183,92 @@ def run_repl(provider: str, temperature: float):
                         color = C.GREEN if role == "user" else C.CYAN
                         print(f"  {c(color, role)}: {content}")
                 continue
-            elif cmd == "/tools":
-                if not tools:
-                    print(c(C.GRAY, "  No tools loaded."))
+            elif cmd == "/save":
+                save_session(session_id, messages, {"provider": provider, "model": cfg["model"]})
+                print(f"  {c(C.GREEN, f'Session saved: {session_id}')}")
+                continue
+            elif cmd == "/load":
+                if len(parts) < 2:
+                    # Show available sessions
+                    sessions = list_sessions(10)
+                    if not sessions:
+                        print(c(C.GRAY, "  No saved sessions."))
+                    else:
+                        print(f"  {c(C.CYAN, 'Recent sessions:')}")
+                        for s in sessions:
+                            print(
+                                f"  {c(C.GREEN, s['session_id'])} "
+                                f"({s['message_count']} msgs) "
+                                f"{c(C.GRAY, s['preview'])}"
+                            )
+                        print(f"\n  {c(C.GRAY, 'Usage: /load <session_id>')}")
                 else:
-                    for t in tools:
-                        name = t["function"]["name"]
-                        desc = t["function"]["description"][:60]
-                        print(f"  {c(C.CYAN, name)} — {c(C.GRAY, desc)}")
+                    loaded = load_session(parts[1])
+                    if loaded is None:
+                        print(c(C.RED, f"  Session not found: {parts[1]}"))
+                    else:
+                        messages[:] = [{"role": "system", "content": system_prompt}]
+                        messages.extend(loaded)
+                        history.clear()
+                        history.extend(m for m in loaded if m["role"] in ("user", "assistant"))
+                        session_id = parts[1]
+                        print(f"  {c(C.GREEN, f'Loaded {len(loaded)} messages from {parts[1]}')}")
+                continue
+            elif cmd == "/continue":
+                # Resume from last session using its summary as context
+                last_id = get_last_session_id()
+                if not last_id:
+                    print(c(C.GRAY, "  No previous session found."))
+                    continue
+                summary = load_session_summary(last_id)
+                if not summary:
+                    # Fallback: load full session
+                    loaded = load_session(last_id)
+                    if loaded is None:
+                        print(c(C.RED, f"  Failed to load session: {last_id}"))
+                        continue
+                    messages[:] = [{"role": "system", "content": system_prompt}]
+                    messages.extend(loaded)
+                    history.clear()
+                    history.extend(m for m in loaded if m["role"] in ("user", "assistant"))
+                    print(f"  {c(C.GREEN, f'Resumed {len(loaded)} messages from {last_id}')}")
+                else:
+                    # Inject compressed summary as context
+                    messages[:] = [{"role": "system", "content": system_prompt}]
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            f"[CONTEXT FROM PREVIOUS SESSION {last_id}]\n\n"
+                            f"{summary}\n\n"
+                            "[End of previous context. Continue from here.]"
+                        ),
+                    })
+                    messages.append({
+                        "role": "assistant",
+                        "content": (
+                            "Understood. I have the context from our previous session. "
+                            "How would you like to continue?"
+                        ),
+                    })
+                    history.clear()
+                    print(f"  {c(C.GREEN, f'Resumed with summary from {last_id}')}")
+                session_id = generate_session_id()
+                continue
+            elif cmd == "/sessions":
+                print_sessions_list(list_sessions(20))
+                continue
+            elif cmd == "/tools":
+                print_tools_list(tools)
                 continue
             elif cmd == "/help":
-                print(f"  {c(C.CYAN, '/clear')}   — Clear history and screen")
-                print(f"  {c(C.CYAN, '/history')} — Show conversation history")
-                print(f"  {c(C.CYAN, '/tools')}   — List available tools")
-                print(f"  {c(C.CYAN, '/exit')}    — Exit")
+                print(f"  {c(C.CYAN, '/clear')}    — Clear history and screen")
+                print(f"  {c(C.CYAN, '/history')}  — Show conversation history")
+                print(f"  {c(C.CYAN, '/save')}     — Save current session")
+                print(f"  {c(C.CYAN, '/load')}     — Load a previous session")
+                print(f"  {c(C.CYAN, '/continue')} — Resume from last session")
+                print(f"  {c(C.CYAN, '/sessions')} — List saved sessions")
+                print(f"  {c(C.CYAN, '/tools')}    — List available tools")
+                print(f"  {c(C.CYAN, '/exit')}     — Exit")
                 continue
             else:
                 print(c(C.GRAY, f"  Unknown command: {cmd}"))

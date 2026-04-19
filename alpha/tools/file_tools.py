@@ -170,8 +170,17 @@ def _validate_path_no_symlink(path: str) -> Path:
 
     Prevents TOCTOU attacks where a symlink is swapped between validation and write.
     Also checks ALL parent path components for symlinks, not just the target.
+    Blocks writes to plugins/ directory to prevent plugin injection.
     """
     p = _validate_path(path)
+
+    # Block writes to plugins/ directory (prevents plugin injection via write_file)
+    try:
+        plugins_dir = (AGENT_WORKSPACE / "plugins").resolve()
+        p.relative_to(plugins_dir)
+        raise PermissionError("Acesso negado: escrita no diretório plugins/ bloqueada por segurança")
+    except ValueError:
+        pass  # not inside plugins/ — OK
 
     # Reject if the target itself is a symlink
     raw = Path(path).expanduser()

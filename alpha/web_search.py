@@ -81,6 +81,25 @@ async def search_multiple_queries(
     return combined
 
 
+_REQ_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+}
+
+# Reusable httpx client (avoids TCP+TLS handshake per URL)
+_shared_client: httpx.AsyncClient | None = None
+
+
+async def _get_shared_client() -> httpx.AsyncClient:
+    global _shared_client
+    if _shared_client is None or _shared_client.is_closed:
+        _shared_client = httpx.AsyncClient(
+            follow_redirects=False,
+            timeout=_TIMEOUT,
+        )
+    return _shared_client
+
+
 async def _fetch_raw(url: str, timeout: float, max_bytes: int) -> tuple[bytes, dict[str, str], int]:
     """
     Fetch raw bytes from URL using httpx.
@@ -93,26 +112,32 @@ async def _fetch_raw(url: str, timeout: float, max_bytes: int) -> tuple[bytes, d
         return b"", {}, 0
 
     try:
-        async with httpx.AsyncClient(
-            follow_redirects=True,
-            timeout=httpx.Timeout(connect=5, read=timeout, write=5, pool=5),
-        ) as client:
-            resp = await client.get(
-                url,
-                headers={
-                    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                },
-            )
-            if resp.status_code >= 400:
-                return b"", {}, resp.status_code
+        client = await _get_shared_client()
+        resp = await client.get(url, headers=_REQ_HEADERS)
 
-            raw = resp.content
-            if len(raw) > max_bytes:
-                raw = raw[:max_bytes]
-                logger.warning(f"Response too large for {url}, truncating at {max_bytes} bytes")
+        # Manual redirect following with SSRF re-validation
+        redirect_count = 0
+        while resp.status_code in (301, 302, 303, 307, 308) and redirect_count < 5:
+            location = resp.headers.get("location")
+            if not location:
+                break
+            redirect_parsed = urlparse(location)
+            redirect_host = redirect_parsed.hostname or ""
+            if _is_private_ip(redirect_host):
+                logger.warning(f"SSRF blocked: redirect to private IP: {location}")
+                return b"", {}, 0
+            resp = await client.get(location, headers=_REQ_HEADERS)
+            redirect_count += 1
 
-            return raw, dict(resp.headers), resp.status_code
+        if resp.status_code >= 400:
+            return b"", {}, resp.status_code
+
+        raw = resp.content
+        if len(raw) > max_bytes:
+            raw = raw[:max_bytes]
+            logger.warning(f"Response too large for {url}, truncating at {max_bytes} bytes")
+
+        return raw, dict(resp.headers), resp.status_code
     except Exception as e:
         logger.debug(f"httpx fetch failed for {url}: {e}")
         return b"", {}, 0

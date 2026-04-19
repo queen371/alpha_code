@@ -15,148 +15,75 @@ from .workspace import AGENT_WORKSPACE
 ALLOWED_COMMANDS = frozenset(
     {
         # Filesystem navigation and inspection
-        "ls",
-        "cat",
-        "head",
-        "tail",
-        "wc",
-        "find",
-        "file",
-        "stat",
-        "du",
-        "df",
-        "tree",
-        "realpath",
-        "basename",
-        "dirname",
-        "readlink",
+        "ls", "cat", "head", "tail", "wc", "find", "file", "stat",
+        "du", "df", "tree", "realpath", "basename", "dirname",
+        "readlink", "pwd",
         # Text processing
-        "grep",
-        "awk",
-        "sed",
-        "sort",
-        "uniq",
-        "cut",
-        "tr",
-        "diff",
-        "jq",
+        "grep", "awk", "sed", "sort", "uniq", "cut", "tr", "diff", "jq",
         # Development
-        "python3",
-        "python",
-        "pip",
-        "pip3",
-        "node",
-        "npm",
-        "npx",
-        "git",
-        "make",
-        "cargo",
-        "go",
-        "rustc",
-        "gcc",
-        "g++",
-        "javac",
-        "java",
+        "python3", "python", "pip", "pip3",
+        "node", "npm", "npx", "yarn", "pnpm", "bun",
+        "git", "make",
+        "cargo", "go", "rustc", "gcc", "g++", "javac", "java",
+        "mvn", "gradle",
+        "ruff", "eslint", "prettier", "mypy", "tsc",
+        "pytest", "vitest", "jest",
         # Networking (read-only / recon)
-        "curl",
-        "wget",
-        "ping",
-        "nslookup",
-        "dig",
-        "traceroute",
-        "whois",
-        "nmap",
-        "netstat",
-        "ss",
+        "curl", "wget", "ping", "nslookup", "dig", "traceroute", "whois",
+        "nmap", "netstat", "ss",
+        "ip", "route", "arp", "ifconfig", "iwconfig", "nmcli",
+        "hostname",
         # Package managers
-        "apt",
-        "apt-get",
-        "brew",
-        "dnf",
-        "yum",
+        "apt", "apt-get", "brew", "dnf", "yum",
         # Archives
-        "tar",
-        "zip",
-        "unzip",
-        "gzip",
-        "gunzip",
+        "tar", "zip", "unzip", "gzip", "gunzip",
         # System info
-        "uname",
-        "whoami",
-        "id",
-        "env",
-        "printenv",
-        "date",
-        "uptime",
-        "ps",
-        "top",
-        "htop",
-        "free",
-        "lscpu",
-        "lsblk",
+        "uname", "whoami", "id", "groups", "env", "printenv",
+        "date", "uptime", "ps", "top", "htop", "free",
+        "lscpu", "lsblk", "lspci", "lsusb", "lsmem", "lshw",
+        "nproc", "getconf", "blkid", "fdisk", "parted",
+        "vmstat", "iostat", "mpstat", "sar",
+        "sensors", "inxi", "neofetch", "screenfetch",
+        "hostnamectl", "timedatectl", "journalctl", "dmesg",
+        "last", "w",
         # Docker
-        "docker",
-        "docker-compose",
+        "docker", "docker-compose",
         # Desktop / multimedia control
-        "pactl",
-        "pacmd",
-        "amixer",
-        "wpctl",  # volume / audio
-        "playerctl",  # media player
-        "brightnessctl",
-        "xbacklight",  # brightness
-        "xrandr",
-        "wlr-randr",  # display
-        "xdg-open",
-        "xdg-mime",  # open files/URLs
+        "pactl", "pacmd", "amixer", "wpctl",        # volume / audio
+        "playerctl",                                  # media player
+        "brightnessctl", "xbacklight",                # brightness
+        "xrandr", "wlr-randr",                        # display
+        "xdg-open", "xdg-mime",                       # open files/URLs
         "xdotool",
-        "xclip",
-        "xsel",
-        "wl-copy",
-        "wl-paste",  # clipboard / input
-        "nmcli",
-        "iwconfig",  # network info
-        "bluetoothctl",  # bluetooth
-        "gsettings",
-        "dconf",  # desktop settings
-        "notify-send",  # notifications
-        "xset",
-        "setxkbmap",  # keyboard/display
+        "xclip", "xsel", "wl-copy", "wl-paste",      # clipboard / input
+        "bluetoothctl",                                # bluetooth
+        "gsettings", "dconf",                          # desktop settings
+        "notify-send",                                 # notifications
+        "xset", "setxkbmap",                           # keyboard/display
         # Misc utilities
-        "echo",
-        "printf",
-        "test",
-        "true",
-        "false",
-        "yes",
-        "tee",
-        "xargs",
-        "touch",
-        "mkdir",
-        "cp",
-        "mv",
-        "rm",
-        "chmod",
-        "chown",
-        "ln",
-        "which",
-        "type",
-        "command",
+        "echo", "printf", "test", "true", "false", "yes",
+        "tee", "xargs",
+        "touch", "mkdir", "cp", "mv", "rm",
+        "chmod", "chown", "ln",
+        "which", "type", "command",
     }
 )
 
 # Patterns that are ALWAYS blocked regardless of allowlist (catastrophic)
+# Pre-compiled for performance (called on every execute_shell/execute_pipeline)
 HARD_BLOCKED = [
-    r"\brm\s+.*(-r\b.*-f\b|-f\b.*-r\b|--recursive|--force|-rf|-fr)",  # rm with recursive+force flags
-    r"\bmkfs\b",  # filesystem format
-    r"\bdd\s+.*of=/dev/",  # dd to devices
-    r":\(\)\s*\{\s*:\|:\s*&\s*\}\s*;?\s*:",  # fork bomb
-    r"\bsudo\b",  # no sudo
-    r"^\s*su\s",  # no su
-    r"\bshutdown\b",  # no shutdown
-    r"\breboot\b",  # no reboot
-    r"\binit\s+[0-6]\b",  # no init runlevel
-    r">\s*/dev/[sh]d",  # redirect to disk devices
+    re.compile(r"\brm\s+.*(-r\b|-R\b|--recursive)", re.IGNORECASE),
+    re.compile(r"\bmkfs\b", re.IGNORECASE),
+    re.compile(r"\bdd\s+.*of=/dev/", re.IGNORECASE),
+    re.compile(r":\(\)\s*\{\s*:\|:\s*&\s*\}\s*;?\s*:", re.IGNORECASE),
+    re.compile(r"\bsudo\b", re.IGNORECASE),
+    re.compile(r"^\s*su\s", re.IGNORECASE),
+    re.compile(r"\bshutdown\b", re.IGNORECASE),
+    re.compile(r"\breboot\b", re.IGNORECASE),
+    re.compile(r"\binit\s+[0-6]\b", re.IGNORECASE),
+    re.compile(r">\s*/dev/[sh]d", re.IGNORECASE),
+    re.compile(r"\bchmod\s+.*[0-7]{3,4}", re.IGNORECASE),
+    re.compile(r"\bchown\s+.*root", re.IGNORECASE),
 ]
 
 
@@ -166,9 +93,13 @@ def _validate_command(command: str) -> str | None:
     Strategy: allowlist of known-safe base commands + hard blocks for catastrophic patterns.
     Supports pipes: each segment is validated independently.
     """
-    # Hard blocks first (catastrophic patterns)
+    # Block newline/carriage return injection (shell interprets as command separator)
+    if "\n" in command or "\r" in command:
+        return "Comando bloqueado: caracteres de newline não são permitidos"
+
+    # Hard blocks first (catastrophic patterns — pre-compiled)
     for pattern in HARD_BLOCKED:
-        if re.search(pattern, command, re.IGNORECASE):
+        if pattern.search(command):
             return "Comando bloqueado por segurança (padrão perigoso detectado)"
 
     # Split by pipe and validate each segment
@@ -270,16 +201,50 @@ async def _execute_shell(command: str, cwd: str = None, timeout: int | None = No
                 "detached": True,
             }
 
-        # Use shell mode for commands with pipes (already validated by approval_logic)
+        # Execute pipes safely via chained subprocess_exec (NEVER use subprocess_shell)
         has_pipe = "|" in command
         if has_pipe:
-            proc = await asyncio.create_subprocess_shell(
-                command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-                env=get_safe_env(),
-            )
+            pipe_segments = [s.strip() for s in command.split("|") if s.strip()]
+            prev_output = None
+            all_stderr = b""
+            last_returncode = 0
+
+            for seg in pipe_segments:
+                try:
+                    seg_parts = shlex.split(seg)
+                except ValueError:
+                    return {"error": f"Segmento malformado no pipe: {seg}"}
+                if not seg_parts:
+                    continue
+
+                proc = await asyncio.create_subprocess_exec(
+                    *seg_parts,
+                    stdin=asyncio.subprocess.PIPE if prev_output is not None else None,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=cwd,
+                    env=get_safe_env(),
+                )
+                try:
+                    stdout, stderr = await asyncio.wait_for(
+                        proc.communicate(input=prev_output), timeout=timeout
+                    )
+                except TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+                    return {
+                        "error": f"Comando excedeu o timeout de {timeout}s",
+                        "timeout": True,
+                    }
+                prev_output = stdout
+                all_stderr += stderr
+                last_returncode = proc.returncode
+
+            return {
+                "exit_code": last_returncode,
+                "stdout": (prev_output or b"").decode(errors="replace")[:15000],
+                "stderr": all_stderr.decode(errors="replace")[:5000],
+            }
         else:
             proc = await asyncio.create_subprocess_exec(
                 *cmd_parts,
@@ -288,21 +253,21 @@ async def _execute_shell(command: str, cwd: str = None, timeout: int | None = No
                 cwd=cwd,
                 env=get_safe_env(),
             )
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except TimeoutError:
-            proc.kill()
-            await proc.wait()
-            return {
-                "error": f"Comando excedeu o timeout de {timeout}s",
-                "timeout": True,
-            }
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            except TimeoutError:
+                proc.kill()
+                await proc.wait()
+                return {
+                    "error": f"Comando excedeu o timeout de {timeout}s",
+                    "timeout": True,
+                }
 
-        return {
-            "exit_code": proc.returncode,
-            "stdout": stdout.decode(errors="replace")[:15000],
-            "stderr": stderr.decode(errors="replace")[:5000],
-        }
+            return {
+                "exit_code": proc.returncode,
+                "stdout": stdout.decode(errors="replace")[:15000],
+                "stderr": stderr.decode(errors="replace")[:5000],
+            }
     except Exception as e:
         return {"error": str(e)}
 

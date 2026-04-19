@@ -9,5 +9,24 @@ dependencies = [
     "duckduckgo-search>=6.0",
 ]
 
+[project.optional-dependencies]
+browser = [
+    "playwright>=1.40",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
 [project.scripts]
 alpha = "main:main"
+
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+include = ["alpha*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

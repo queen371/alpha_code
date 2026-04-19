@@ -181,19 +181,34 @@ async def _http_request_urllib(
     import urllib.error
     import urllib.request
 
+    # Resolve DNS and validate IP BEFORE connecting (prevents DNS rebinding)
+    parsed = urlparse(url)
+    hostname = parsed.hostname
+    resolved_ip = None
+    if hostname:
+        try:
+            resolved_ip = await _resolve_and_validate(hostname)
+        except ValueError as e:
+            return {"error": str(e), "blocked": True}
+
     try:
         # Build opener that does NOT follow redirects (DNS rebinding fix)
         opener = urllib.request.build_opener(_NoRedirectHandler)
-        req = urllib.request.Request(url, method=method)
+        # Use resolved IP in URL to prevent DNS rebinding between validate and connect
+        if resolved_ip and hostname:
+            fixed_url = url.replace(f"://{hostname}", f"://{resolved_ip}", 1)
+        else:
+            fixed_url = url
+        req = urllib.request.Request(fixed_url, method=method)
         req.add_header("User-Agent", "ALPHA-Agent/1.0")
+        req.add_header("Host", hostname or "")
         if headers:
             for k, v in headers.items():
                 req.add_header(k, v)
         data = body.encode() if body else None
 
-        loop = asyncio.get_event_loop()
         resp = await asyncio.wait_for(
-            loop.run_in_executor(None, lambda: opener.open(req, data=data, timeout=timeout)),
+            asyncio.to_thread(lambda: opener.open(req, data=data, timeout=min(timeout, 30))),
             timeout=timeout + 5,
         )
 

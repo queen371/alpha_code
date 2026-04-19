@@ -143,11 +143,17 @@ def _sanitize_git_args(action: str, args: str) -> tuple[list[str], str | None]:
     _DANGEROUS_FMT = _re.compile(
         r"%\((if|then|else|end|contents:signature|trailers)\)", _re.IGNORECASE
     )
-    for part in parts:
+    for j, part in enumerate(parts):
+        # Check --format=VALUE and --pretty=VALUE (with =)
         if part.startswith("--format=") or part.startswith("--pretty="):
             fmt_value = part.split("=", 1)[1]
             if _DANGEROUS_FMT.search(fmt_value):
                 return [], f"Format string com expansões perigosas bloqueada: '{part[:50]}'"
+        # Check --format VALUE and --pretty VALUE (space-separated)
+        elif part in ("--format", "--pretty") and j + 1 < len(parts):
+            next_val = parts[j + 1]
+            if _DANGEROUS_FMT.search(next_val):
+                return [], f"Format string com expansões perigosas bloqueada: '{next_val[:50]}'"
 
     # Se a action tem whitelist, validar flags
     allowed = _ALLOWED_GIT_FLAGS.get(action)
@@ -309,6 +315,11 @@ async def _git_operation(
             return {"error": err}
         if not extra:
             extra = ["--mixed", "HEAD~1"]
+        else:
+            # Inject --mixed if no mode flag provided (avoid implicit git defaults)
+            has_mode = any(f in extra for f in ("--soft", "--mixed", "--hard", "--merge", "--keep"))
+            if not has_mode:
+                extra = ["--mixed"] + extra
         return await _run_git(["reset"] + extra, cwd)
 
     elif action == "clean":
