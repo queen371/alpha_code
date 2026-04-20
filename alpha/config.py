@@ -14,7 +14,7 @@ load_dotenv(_PROJECT_ROOT / ".env", override=True)
 # ─── Defaults ───
 
 DEFAULT_PROVIDER = os.getenv("ALPHA_PROVIDER", "deepseek")
-MAX_ITERATIONS = 25
+MAX_ITERATIONS = 50
 TOOL_RESULT_MAX_CHARS = 20_000
 LLM_TIMEOUT = 300  # seconds per LLM call
 
@@ -119,11 +119,11 @@ ALPHA_FEATURES = FEATURES
 
 # ─── Tool Timeouts (seconds) ───
 TOOL_TIMEOUTS: dict = {
-    "shell": 30,
+    "shell": 180,
     "code": 60,
     "git": 30,
     "network": 30,
-    "pipeline": 120,
+    "pipeline": 240,
     "database": 30,
     "browser": 180,
 }

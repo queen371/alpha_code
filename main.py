@@ -16,9 +16,12 @@ import os
 import sys
 import textwrap
 
+from alpha.agents import AgentScope, get_agent, list_agents, load_all_agents
 from alpha.config import DEFAULT_PROVIDER, get_provider_config, load_system_prompt
+from alpha.skills import inject_skill_index, list_skills, load_all_skills
 from alpha.display import (
     C,
+    ThinkingIndicator,
     c,
     print_approval_request,
     print_banner,
@@ -41,17 +44,45 @@ from alpha.history import (
 )
 
 
-def _get_tools():
-    """Load tools and return (get_tool_fn, openai_tools_list)."""
+def _build_system_prompt(agent: AgentScope | None = None) -> str:
+    """Load base system prompt, apply agent extras, inject (filtered) skill index."""
+    load_all_skills()
+    base = load_system_prompt()
+    if agent is not None and agent.system_prompt_extra:
+        base = f"{base}\n\n# AGENT PROFILE: {agent.name}\n{agent.system_prompt_extra}"
+    skill_filter = (
+        agent.filter_skills
+        if agent is not None and (agent.skills_allow or agent.skills_deny)
+        else None
+    )
+    return inject_skill_index(base, name_filter=skill_filter)
+
+
+def _get_tools_for_agent(agent: AgentScope | None):
+    """Return (get_tool_fn, openai_tools_list) filtered by the agent's tool scope."""
     try:
         from alpha.tools import get_openai_tools, get_tool, load_all_tools
 
         load_all_tools()
-        tools = get_openai_tools()
+        if agent is not None and (agent.tools_allow or agent.tools_deny):
+            tools = get_openai_tools(name_filter=agent.filter_tools)
+        else:
+            tools = get_openai_tools()
         return get_tool, tools
     except ImportError:
-        # Tools module not available — agent will run without tools
         return None, []
+
+
+def _resolve_active_agent() -> AgentScope | None:
+    """Pick the active agent from ALPHA_AGENT env, else a 'default' profile if it exists."""
+    load_all_agents()
+    explicit = os.getenv("ALPHA_AGENT", "").strip()
+    if explicit:
+        agent = get_agent(explicit)
+        if agent is None:
+            print_error(f"Agent '{explicit}' not found (ALPHA_AGENT). Using no profile.")
+        return agent
+    return get_agent("default")
 
 
 def _approval_callback(tool_name: str, args: dict) -> bool:
@@ -72,49 +103,63 @@ def _shutdown_browser_session():
 atexit.register(_shutdown_browser_session)
 
 
-async def _run_once(messages, user_message, provider, temperature, get_tool_fn, tools):
+async def _run_once(messages, user_message, provider, temperature, get_tool_fn, tools, workspace=None):
     """Run a single agent turn and display events."""
     from alpha.agent import run_agent
 
     full_reply = ""
+    indicator = ThinkingIndicator("Pensando")
+    indicator.start()
 
-    async for event in run_agent(
-        messages,
-        user_message,
-        temperature=temperature,
-        provider=provider,
-        get_tool_fn=get_tool_fn,
-        tools=tools,
-        approval_callback=_approval_callback,
-    ):
-        event_type = event.get("type", "")
+    try:
+        async for event in run_agent(
+            messages,
+            user_message,
+            temperature=temperature,
+            provider=provider,
+            get_tool_fn=get_tool_fn,
+            tools=tools,
+            approval_callback=_approval_callback,
+            workspace=workspace,
+        ):
+            event_type = event.get("type", "")
 
-        if event_type == "token":
-            text = event.get("text", "")
-            sys.stdout.write(text)
-            sys.stdout.flush()
-            full_reply += text
+            if event_type == "token":
+                indicator.stop()
+                text = event.get("text", "")
+                sys.stdout.write(text)
+                sys.stdout.flush()
+                full_reply += text
 
-        elif event_type == "tool_call":
-            print_tool_call(event["name"], event.get("args", {}), event.get("safety", "safe"))
+            elif event_type == "tool_call":
+                indicator.stop()
+                print_tool_call(event["name"], event.get("args", {}), event.get("safety", "safe"))
+                indicator.start(f"Executando {event['name']}")
 
-        elif event_type == "tool_result":
-            print_tool_result(event["name"], event.get("result", {}))
+            elif event_type == "tool_result":
+                indicator.stop()
+                print_tool_result(event["name"], event.get("result", {}))
+                indicator.start("Pensando")
 
-        elif event_type == "approval_needed":
-            # Approval is handled inside executor via callback
-            pass
+            elif event_type == "approval_needed":
+                indicator.stop()
 
-        elif event_type == "context_compressed":
-            print_context_compressed(event.get("before", 0), event.get("after", 0))
+            elif event_type == "context_compressed":
+                indicator.stop()
+                print_context_compressed(event.get("before", 0), event.get("after", 0))
+                indicator.start("Pensando")
 
-        elif event_type == "done":
-            reply = event.get("reply", "")
-            if reply and not full_reply:
-                full_reply = reply
+            elif event_type == "done":
+                indicator.stop()
+                reply = event.get("reply", "")
+                if reply and not full_reply:
+                    full_reply = reply
 
-        elif event_type == "error":
-            print_error(event.get("message", "Unknown error"))
+            elif event_type == "error":
+                indicator.stop()
+                print_error(event.get("message", "Unknown error"))
+    finally:
+        indicator.stop()
 
     # Ensure newline after streaming
     if full_reply and not full_reply.endswith("\n"):
@@ -125,20 +170,36 @@ async def _run_once(messages, user_message, provider, temperature, get_tool_fn, 
 
 def run_repl(provider: str, temperature: float):
     """Interactive REPL loop."""
+    active_agent = _resolve_active_agent()
+    if active_agent and active_agent.provider:
+        provider = active_agent.provider
+    if active_agent and active_agent.temperature is not None:
+        temperature = active_agent.temperature
+
     cfg = get_provider_config(provider)
+    if active_agent and active_agent.model:
+        cfg["model"] = active_agent.model
+
     print_banner(provider, cfg["model"])
 
-    system_prompt = load_system_prompt()
+    system_prompt = _build_system_prompt(active_agent)
     messages = [{"role": "system", "content": system_prompt}]
     history = []
     session_id = generate_session_id()
 
-    get_tool_fn, tools = _get_tools()
+    get_tool_fn, tools = _get_tools_for_agent(active_agent)
 
     if tools:
         print_phase(f"Loaded {len(tools)} tools")
     else:
         print_phase("No tools loaded — running in chat-only mode")
+
+    skills_count = len(list_skills())
+    if skills_count:
+        print_phase(f"Loaded {skills_count} skills")
+
+    if active_agent:
+        print_phase(f"Active agent: {active_agent.name}")
 
     while True:
         try:
@@ -154,6 +215,45 @@ def run_repl(provider: str, temperature: float):
 
         if not user_input:
             continue
+
+        # One-shot agent dispatch: "@name message"
+        if user_input.startswith("@"):
+            parts = user_input.split(maxsplit=1)
+            if len(parts) == 2 and len(parts[0]) > 1:
+                at_name = parts[0][1:]
+                at_msg = parts[1]
+                at_agent = get_agent(at_name)
+                if at_agent is None:
+                    print_error(f"Agent not found: {at_name}")
+                    continue
+
+                at_provider = at_agent.provider or provider
+                at_temperature = (
+                    at_agent.temperature if at_agent.temperature is not None else temperature
+                )
+                at_system = _build_system_prompt(at_agent)
+                at_get_tool, at_tools = _get_tools_for_agent(at_agent)
+
+                print(c(C.GRAY, f"  (one-shot → {at_name})"))
+                print()
+
+                cwd = os.getcwd()
+                at_messages = [
+                    {"role": "system", "content": at_system},
+                    {"role": "user", "content": f"[CWD: {cwd}]\n{at_msg}"},
+                ]
+                try:
+                    asyncio.run(
+                        _run_once(
+                            at_messages, at_msg, at_provider, at_temperature,
+                            at_get_tool, at_tools,
+                            workspace=at_agent.workspace,
+                        )
+                    )
+                except KeyboardInterrupt:
+                    print(c(C.YELLOW, "\n\nInterrupted."))
+                print()
+                continue
 
         # Commands
         if user_input.startswith("/"):
@@ -260,6 +360,50 @@ def run_repl(provider: str, temperature: float):
             elif cmd == "/tools":
                 print_tools_list(tools)
                 continue
+            elif cmd == "/agents":
+                agents = list_agents()
+                if not agents:
+                    print(c(C.GRAY, "  No agents defined. Create ./agents/<name>/agent.yaml"))
+                else:
+                    current = active_agent.name if active_agent else None
+                    for a in agents:
+                        marker = c(C.GREEN, "●") if a.name == current else " "
+                        desc = a.description or c(C.GRAY, "(no description)")
+                        print(f"  {marker} {c(C.CYAN, a.name):30s} {desc}")
+                continue
+            elif cmd == "/agent":
+                if len(parts) < 2:
+                    name = active_agent.name if active_agent else "(none)"
+                    print(f"  {c(C.GRAY, 'Active agent:')} {name}")
+                    print(f"  {c(C.GRAY, 'Usage: /agent <name>  (or /agent none to clear)')}")
+                else:
+                    target = parts[1]
+                    if target in ("none", "clear", "off"):
+                        active_agent = None
+                    else:
+                        picked = get_agent(target)
+                        if picked is None:
+                            print(c(C.RED, f"  Agent not found: {target}"))
+                            continue
+                        active_agent = picked
+
+                    # Re-apply scope
+                    if active_agent and active_agent.provider:
+                        provider = active_agent.provider
+                    if active_agent and active_agent.temperature is not None:
+                        temperature = active_agent.temperature
+                    cfg = get_provider_config(provider)
+                    if active_agent and active_agent.model:
+                        cfg["model"] = active_agent.model
+                    system_prompt = _build_system_prompt(active_agent)
+                    get_tool_fn, tools = _get_tools_for_agent(active_agent)
+                    messages[:] = [{"role": "system", "content": system_prompt}]
+                    history.clear()
+                    session_id = generate_session_id()
+                    name = active_agent.name if active_agent else "(none)"
+                    print(f"  {c(C.GREEN, '✓')} Switched to agent: {name} "
+                          f"({len(tools)} tools, provider={provider}, model={cfg['model']})")
+                continue
             elif cmd == "/help":
                 print(f"  {c(C.CYAN, '/clear')}    — Clear history and screen")
                 print(f"  {c(C.CYAN, '/history')}  — Show conversation history")
@@ -268,6 +412,8 @@ def run_repl(provider: str, temperature: float):
                 print(f"  {c(C.CYAN, '/continue')} — Resume from last session")
                 print(f"  {c(C.CYAN, '/sessions')} — List saved sessions")
                 print(f"  {c(C.CYAN, '/tools')}    — List available tools")
+                print(f"  {c(C.CYAN, '/agents')}   — List named agents")
+                print(f"  {c(C.CYAN, '/agent')}    — Show/switch active agent")
                 print(f"  {c(C.CYAN, '/exit')}     — Exit")
                 continue
             else:
@@ -284,7 +430,11 @@ def run_repl(provider: str, temperature: float):
         print()
         try:
             reply = asyncio.run(
-                _run_once(messages, user_input, provider, temperature, get_tool_fn, tools)
+                _run_once(
+                    messages, user_input, provider, temperature,
+                    get_tool_fn, tools,
+                    workspace=active_agent.workspace if active_agent else None,
+                )
             )
         except KeyboardInterrupt:
             print(c(C.YELLOW, "\n\nInterrupted."))
@@ -298,7 +448,13 @@ def run_repl(provider: str, temperature: float):
 
 def run_single(provider: str, temperature: float, message: str):
     """Single command mode (non-interactive)."""
-    system_prompt = load_system_prompt()
+    active_agent = _resolve_active_agent()
+    if active_agent and active_agent.provider:
+        provider = active_agent.provider
+    if active_agent and active_agent.temperature is not None:
+        temperature = active_agent.temperature
+
+    system_prompt = _build_system_prompt(active_agent)
     cwd = os.getcwd()
     contextualized = f"[CWD: {cwd}]\n{message}"
     messages = [
@@ -306,11 +462,15 @@ def run_single(provider: str, temperature: float, message: str):
         {"role": "user", "content": contextualized},
     ]
 
-    get_tool_fn, tools = _get_tools()
+    get_tool_fn, tools = _get_tools_for_agent(active_agent)
 
     try:
         reply = asyncio.run(
-            _run_once(messages, message, provider, temperature, get_tool_fn, tools)
+            _run_once(
+                messages, message, provider, temperature,
+                get_tool_fn, tools,
+                workspace=active_agent.workspace if active_agent else None,
+            )
         )
     except KeyboardInterrupt:
         print(c(C.YELLOW, "\nInterrupted."))
@@ -351,8 +511,18 @@ def main():
         action="store_true",
         help="List available providers and exit",
     )
+    parser.add_argument(
+        "--init",
+        action="store_true",
+        help="Run the onboarding wizard (configure provider, API key, workspace)",
+    )
 
     args = parser.parse_args()
+
+    if args.init:
+        from alpha.wizard import run_wizard
+
+        sys.exit(0 if run_wizard() else 1)
 
     if args.list_providers:
         from alpha.config import get_available_providers

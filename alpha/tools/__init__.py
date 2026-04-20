@@ -47,8 +47,24 @@ def register_tool(tool_def: ToolDefinition):
     logger.debug(f"Tool registered: {tool_def.name} [{tool_def.category}]")
 
 
-def get_openai_tools(mode: str | None = None) -> list[dict]:
-    """Return tools in OpenAI function-calling format, optionally filtered by mode."""
+def get_openai_tools(
+    mode: str | None = None,
+    name_filter: "Callable[[list[str]], list[str]] | None" = None,
+) -> list[dict]:
+    """Return tools in OpenAI function-calling format.
+
+    Args:
+        mode: Optional mode filter (keeps tools whose modes include it).
+        name_filter: Optional function that takes all eligible tool names and
+            returns a narrowed list (e.g. from an AgentScope's filter_tools).
+    """
+    eligible = [
+        (name, td) for name, td in TOOL_REGISTRY.items()
+        if td.enabled and (not td.modes or mode is None or mode in td.modes)
+    ]
+    if name_filter is not None:
+        allowed = set(name_filter([name for name, _ in eligible]))
+        eligible = [(n, td) for n, td in eligible if n in allowed]
     return [
         {
             "type": "function",
@@ -58,8 +74,7 @@ def get_openai_tools(mode: str | None = None) -> list[dict]:
                 "parameters": td.parameters,
             },
         }
-        for name, td in TOOL_REGISTRY.items()
-        if td.enabled and (not td.modes or mode is None or mode in td.modes)
+        for name, td in eligible
     ]
 
 

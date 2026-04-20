@@ -167,6 +167,7 @@ async def run_agent(
     tools: list[dict] | None = None,
     approval_callback=None,
     max_iterations: int | None = None,
+    workspace: str | None = None,
 ) -> AsyncGenerator[dict, None]:
     """
     Run the agent loop. Async generator yielding display events.
@@ -302,6 +303,7 @@ async def run_agent(
                 needs_approval_fn=needs_approval,
                 approval_callback=approval_callback,
                 get_tool_fn=get_tool_fn,
+                workspace=workspace,
             ):
                 yield event
                 # Track tool results for stale progress detection

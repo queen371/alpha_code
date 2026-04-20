@@ -1,0 +1,4 @@
+name: default
+description: Balanced general-purpose agent. Full toolbelt, all skills.
+# Inherits provider/model from ALPHA_PROVIDER env var and --provider CLI flag.
+# No filters = every tool and every skill available.

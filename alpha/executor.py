@@ -19,6 +19,7 @@ _SLOW_TOOL_TIMEOUT = 300  # 5 minutes for investigation pipelines
 _SLOW_TOOLS = frozenset({
     "investigate_person", "deploy_check", "run_tests",
     "delegate_task", "delegate_parallel",
+    "execute_shell", "execute_pipeline",
     "browser_open", "browser_navigate", "browser_get_content",
     "browser_describe_page", "browser_screenshot",
     "browser_click", "browser_fill", "browser_wait_for",
@@ -84,12 +85,24 @@ async def _execute_single_tool(tool_def, tool_name: str, args: dict) -> dict:
     return result
 
 
+def _enforce_workspace(
+    workspace: str | None, tool_name: str, args: dict
+) -> tuple[bool, dict, str]:
+    """Apply workspace validation to args. Returns (ok, new_args, error_msg)."""
+    if not workspace:
+        return True, args, ""
+    from .agents import validate_workspace_args
+
+    return validate_workspace_args(workspace, tool_name, args)
+
+
 async def execute_tool_calls(
     tool_calls: list[dict],
     messages: list[dict],
     needs_approval_fn: Callable[[str, dict], bool],
     approval_callback: Callable[[str, dict], bool] | None = None,
     get_tool_fn: Callable | None = None,
+    workspace: str | None = None,
 ) -> AsyncGenerator[dict, None]:
     """
     Execute tool calls, yielding events for each step.
@@ -112,7 +125,8 @@ async def execute_tool_calls(
     # Single tool call — fast path (no parallelization overhead)
     if len(tool_calls) == 1:
         async for event in _execute_sequential(
-            tool_calls, messages, needs_approval_fn, approval_callback, get_tool_fn
+            tool_calls, messages, needs_approval_fn, approval_callback, get_tool_fn,
+            workspace=workspace,
         ):
             yield event
         return
@@ -133,6 +147,19 @@ async def execute_tool_calls(
             # Unknown tool — handle immediately
             result = {"error": f"Unknown tool: {tool_name}"}
             yield {"type": "tool_call", "name": tool_name, "args": args, "safety": "unknown"}
+            yield {"type": "tool_result", "name": tool_name, "result": result}
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc["id"],
+                "content": json.dumps(result, ensure_ascii=False),
+            })
+            continue
+
+        # Workspace enforcement (rewrites or rejects args)
+        ok, args, err = _enforce_workspace(workspace, tool_name, args)
+        if not ok:
+            result = {"error": err, "workspace_violation": True}
+            yield {"type": "tool_call", "name": tool_name, "args": args, "safety": "denied"}
             yield {"type": "tool_result", "name": tool_name, "result": result}
             messages.append({
                 "role": "tool",
@@ -213,6 +240,7 @@ async def _execute_sequential(
     needs_approval_fn: Callable[[str, dict], bool],
     approval_callback: Callable[[str, dict], bool] | None = None,
     get_tool_fn: Callable | None = None,
+    workspace: str | None = None,
 ) -> AsyncGenerator[dict, None]:
     """Original sequential execution for single tool calls."""
     for tc in tool_calls:
@@ -230,6 +258,19 @@ async def _execute_sequential(
         if tool_def is None:
             result = {"error": f"Unknown tool: {tool_name}"}
             yield {"type": "tool_call", "name": tool_name, "args": args, "safety": "unknown"}
+            yield {"type": "tool_result", "name": tool_name, "result": result}
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc["id"],
+                "content": json.dumps(result, ensure_ascii=False),
+            })
+            continue
+
+        # Workspace enforcement
+        ok, args, err = _enforce_workspace(workspace, tool_name, args)
+        if not ok:
+            result = {"error": err, "workspace_violation": True}
+            yield {"type": "tool_call", "name": tool_name, "args": args, "safety": "denied"}
             yield {"type": "tool_result", "name": tool_name, "result": result}
             messages.append({
                 "role": "tool",

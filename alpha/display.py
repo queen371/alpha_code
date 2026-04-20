@@ -5,6 +5,7 @@ Kali Linux-inspired color scheme with priority-based visual indicators.
 Green/red dominant palette, safety-aware tool display, hacker aesthetic.
 """
 
+import asyncio
 import json
 import os
 import sys
@@ -357,3 +358,69 @@ def print_sessions_list(sessions: list[dict]) -> None:
         count = c(C.BLUE, f'{s["message_count"]} msgs')
         preview = c(C.DIM, s.get("preview", ""))
         print(f"  {sid} {ts} ({count}) {preview}")
+
+
+# ─── Thinking indicator (spinner) ───
+
+_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+_FLOWER_FRAMES = ["✻", "✽", "✾", "✿", "❀", "✿", "✾", "✽"]
+
+
+class ThinkingIndicator:
+    """Animated spinner for in-progress async work.
+
+    Writes a rotating frame + label + elapsed time on a single line with \\r.
+    Call start() before work begins and stop() before printing other output.
+    """
+
+    def __init__(self, label: str = "Pensando", style: str = "flower") -> None:
+        self.label = label
+        self.frames = _FLOWER_FRAMES if style == "flower" else _SPINNER_FRAMES
+        self._task: asyncio.Task | None = None
+        self._running = False
+        self._start_time = 0.0
+        self._enabled = supports_color()
+
+    def start(self, label: str | None = None) -> None:
+        if not self._enabled or self._running:
+            if label:
+                self.label = label
+            return
+        if label:
+            self.label = label
+        self._running = True
+        self._start_time = time.monotonic()
+        try:
+            loop = asyncio.get_running_loop()
+            self._task = loop.create_task(self._animate())
+        except RuntimeError:
+            self._running = False
+
+    def stop(self) -> None:
+        if not self._running:
+            return
+        self._running = False
+        if self._task and not self._task.done():
+            self._task.cancel()
+        self._task = None
+        if self._enabled:
+            sys.stdout.write("\r\033[K")
+            sys.stdout.flush()
+
+    def update_label(self, label: str) -> None:
+        self.label = label
+
+    async def _animate(self) -> None:
+        i = 0
+        try:
+            while self._running:
+                frame = self.frames[i % len(self.frames)]
+                elapsed = time.monotonic() - self._start_time
+                dur = f" ({int(elapsed)}s)" if elapsed >= 1 else ""
+                line = f"\r{c(C.MAGENTA, frame)} {c(C.GRAY, self.label + dur)}\033[K"
+                sys.stdout.write(line)
+                sys.stdout.flush()
+                i += 1
+                await asyncio.sleep(0.12)
+        except asyncio.CancelledError:
+            pass

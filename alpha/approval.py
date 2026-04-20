@@ -75,7 +75,7 @@ SAFE_SHELL_COMMANDS = frozenset(
         # Networking info (read-only)
         "ping", "nslookup", "dig",
         "ip", "route", "arp", "ifconfig", "iwconfig",
-        "hostname", "nmcli", "traceroute", "whois",
+        "hostname", "nmcli", "traceroute", "tracepath", "mtr", "host", "whois",
         # Filesystem read-only
         "ls", "cat", "head", "tail", "wc", "find", "file", "stat",
         "tree", "grep", "sort", "uniq", "diff", "pwd",

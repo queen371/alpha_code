@@ -6,7 +6,8 @@ requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.27",
     "python-dotenv>=1.0",
-    "duckduckgo-search>=6.0",
+    "ddgs>=9.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

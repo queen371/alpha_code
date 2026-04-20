@@ -29,8 +29,8 @@ ALLOWED_COMMANDS = frozenset(
         "ruff", "eslint", "prettier", "mypy", "tsc",
         "pytest", "vitest", "jest",
         # Networking (read-only / recon)
-        "curl", "wget", "ping", "nslookup", "dig", "traceroute", "whois",
-        "nmap", "netstat", "ss",
+        "curl", "wget", "ping", "nslookup", "dig", "traceroute", "tracepath",
+        "mtr", "host", "whois", "nmap", "tcpdump", "netstat", "ss",
         "ip", "route", "arp", "ifconfig", "iwconfig", "nmcli",
         "hostname",
         # Package managers
@@ -66,45 +66,73 @@ ALLOWED_COMMANDS = frozenset(
         "touch", "mkdir", "cp", "mv", "rm",
         "chmod", "chown", "ln",
         "which", "type", "command",
+        # Privilege probes (restricted args — see _is_sudo_safe)
+        "sudo",
     }
 )
 
-# Patterns that are ALWAYS blocked regardless of allowlist (catastrophic)
-# Pre-compiled for performance (called on every execute_shell/execute_pipeline)
+# Catastrophic / system-destructive patterns — blocked regardless of approval.
+# Model: denylist only. Any command not matched here is allowed (subject to approval).
 HARD_BLOCKED = [
-    re.compile(r"\brm\s+.*(-r\b|-R\b|--recursive)", re.IGNORECASE),
-    re.compile(r"\bmkfs\b", re.IGNORECASE),
-    re.compile(r"\bdd\s+.*of=/dev/", re.IGNORECASE),
-    re.compile(r":\(\)\s*\{\s*:\|:\s*&\s*\}\s*;?\s*:", re.IGNORECASE),
-    re.compile(r"\bsudo\b", re.IGNORECASE),
-    re.compile(r"^\s*su\s", re.IGNORECASE),
-    re.compile(r"\bshutdown\b", re.IGNORECASE),
-    re.compile(r"\breboot\b", re.IGNORECASE),
+    # Recursive file deletion
+    re.compile(r"\brm\s+(?:-\S*[rR]\S*|--recursive\b)", re.IGNORECASE),
+    # Filesystem formatting / wiping
+    re.compile(r"\bmkfs(?:\.[a-z0-9]+)?\b", re.IGNORECASE),
+    re.compile(r"\bmke2fs\b", re.IGNORECASE),
+    re.compile(r"\bwipefs\b", re.IGNORECASE),
+    re.compile(r"\bshred\b", re.IGNORECASE),
+    # Raw disk writes
+    re.compile(r"\bdd\s+[^\n]*of=/dev/(sd|nvme|hd|xvd|vd|mmcblk)", re.IGNORECASE),
+    re.compile(r">\s*/dev/(sd|nvme|hd|xvd|vd|mmcblk)", re.IGNORECASE),
+    # Fork bomb
+    re.compile(r":\(\)\s*\{\s*:\|:\s*&\s*\}\s*;?\s*:"),
+    # su (sudo is handled via pattern matches below, not blanket-blocked)
+    re.compile(r"(^|[;&|]\s*)su(\s|$)", re.IGNORECASE),
+    # Power / halt / reboot
+    re.compile(r"\b(shutdown|reboot|halt|poweroff)\b", re.IGNORECASE),
     re.compile(r"\binit\s+[0-6]\b", re.IGNORECASE),
-    re.compile(r">\s*/dev/[sh]d", re.IGNORECASE),
-    re.compile(r"\bchmod\s+.*[0-7]{3,4}", re.IGNORECASE),
-    re.compile(r"\bchown\s+.*root", re.IGNORECASE),
+    re.compile(r"\btelinit\b", re.IGNORECASE),
+    re.compile(r"\bsystemctl\s+(poweroff|reboot|halt|kexec|rescue|emergency|suspend|hibernate)\b", re.IGNORECASE),
+    # Writes to critical system files
+    re.compile(r">\s*/etc/(passwd|shadow|sudoers|fstab|hosts(\s|$))", re.IGNORECASE),
+    re.compile(r"\b(tee|dd)\s+[^|;]*\s/etc/(passwd|shadow|sudoers|fstab)", re.IGNORECASE),
+    re.compile(r"\bvisudo\b", re.IGNORECASE),
+    # chmod on critical system dirs
+    re.compile(r"\bchmod\s+\S+\s+/(etc|usr|boot|bin|sbin|lib|lib64|sys|proc)(\s|/|$)", re.IGNORECASE),
+    re.compile(r"\bchmod\s+-R\s+\S+\s+/(\s|$)", re.IGNORECASE),
+    # chown to root on system paths
+    re.compile(r"\bchown\s+\S*root\S*\s+/(etc|usr|boot|bin|sbin|lib)", re.IGNORECASE),
+    # Kernel module manipulation
+    re.compile(r"\b(insmod|rmmod)\b", re.IGNORECASE),
+    re.compile(r"\bmodprobe\s+-r\b", re.IGNORECASE),
+    # LVM / crypto destruction
+    re.compile(r"\b(lvremove|vgremove|pvremove)\b", re.IGNORECASE),
+    re.compile(r"\bcryptsetup\s+(erase|luksErase|wipeKey|luksRemoveKey)\b", re.IGNORECASE),
+    # User/group destruction
+    re.compile(r"\b(userdel|groupdel)\b", re.IGNORECASE),
+    # Interactive disk partitioning on real devices
+    re.compile(r"\b(fdisk|gdisk|cfdisk|sfdisk|parted)\s+/dev/", re.IGNORECASE),
+    # Firewall flush/reset
+    re.compile(r"\b(iptables|ip6tables|nft)\b\s+(?:.*\s+)?(?:-F|-X|--flush)(?:\s|$)", re.IGNORECASE),
+    re.compile(r"\bufw\s+(reset|disable)\b", re.IGNORECASE),
 ]
 
 
 def _validate_command(command: str) -> str | None:
-    """Return error message if command is blocked, None if OK.
+    """Return error message if command is destructive, None otherwise.
 
-    Strategy: allowlist of known-safe base commands + hard blocks for catastrophic patterns.
-    Supports pipes: each segment is validated independently.
+    Denylist model: only catastrophic patterns (HARD_BLOCKED) are rejected.
+    Any other command runs. Approval layer decides user prompting.
     """
-    # Block newline/carriage return injection (shell interprets as command separator)
     if "\n" in command or "\r" in command:
         return "Comando bloqueado: caracteres de newline não são permitidos"
 
-    # Hard blocks first (catastrophic patterns — pre-compiled)
     for pattern in HARD_BLOCKED:
         if pattern.search(command):
-            return "Comando bloqueado por segurança (padrão perigoso detectado)"
+            return "Comando bloqueado por segurança (padrão destrutivo detectado)"
 
-    # Split by pipe and validate each segment
+    # Syntactic sanity check per pipe segment
     segments = command.split("|") if "|" in command else [command]
-
     for segment in segments:
         segment = segment.strip()
         if not segment:
@@ -113,33 +141,8 @@ def _validate_command(command: str) -> str | None:
             parts = shlex.split(segment)
             if not parts:
                 continue
-            base_cmd = Path(parts[0]).name  # /usr/bin/python3 -> python3
         except ValueError:
             return "Comando malformado"
-
-        if base_cmd not in ALLOWED_COMMANDS:
-            return (
-                f"Comando '{base_cmd}' não está na lista de comandos permitidos. "
-                f"Use execute_python para lógica complexa."
-            )
-
-    # When sandbox is disabled, restrict package managers that modify the system
-    from ..config import FEATURES as ALPHA_FEATURES
-
-    if not ALPHA_FEATURES.get("sandbox_enabled"):
-        # Only block system-modifying commands, not dev tools
-        _SANDBOX_ONLY_COMMANDS = frozenset({
-            "nmap", "apt", "apt-get", "brew", "dnf", "yum",
-        })
-        try:
-            first_cmd = Path(shlex.split(segments[0].strip())[0]).name
-        except (ValueError, IndexError):
-            first_cmd = ""
-        if first_cmd in _SANDBOX_ONLY_COMMANDS:
-            return (
-                f"Comando '{first_cmd}' requer sandbox habilitado (sandbox_enabled=true). "
-                f"Ou use install_package para instalar pacotes."
-            )
 
     return None
 
@@ -173,7 +176,7 @@ async def _execute_shell(command: str, cwd: str = None, timeout: int | None = No
         cwd = str(AGENT_WORKSPACE)
 
     # Cap timeout
-    timeout = min(timeout, 120)
+    timeout = min(timeout, 300)
 
     try:
         try:

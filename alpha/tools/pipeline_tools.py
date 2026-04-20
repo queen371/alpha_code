@@ -33,7 +33,10 @@ _SHELL_EXPANSION_RE = re.compile(
 
 
 def _validate_pipeline(pipeline: str) -> str | None:
-    """Validate a full pipeline string. Returns error message or None."""
+    """Validate a full pipeline string. Returns error message or None.
+
+    Denylist model: catastrophic patterns blocked; everything else runs.
+    """
     # Block shell variable/command expansion (injection vector)
     if _SHELL_EXPANSION_RE.search(pipeline):
         return "Pipeline bloqueado: expansão de variáveis/comandos ($(), ``, ${}) não é permitida"
@@ -41,34 +44,23 @@ def _validate_pipeline(pipeline: str) -> str | None:
     # Check hard-blocked patterns on the full string first (pre-compiled)
     for pattern in HARD_BLOCKED:
         if pattern.search(pipeline):
-            return "Pipeline bloqueado por segurança (padrão perigoso detectado)"
+            return "Pipeline bloqueado por segurança (padrão destrutivo detectado)"
 
-    # Split by pipe/logical operators and validate each command
+    # Syntactic check per segment (no allowlist; HARD_BLOCKED already gated)
     segments = re.split(r"\s*(?:\|\||&&|;|\|)\s*", pipeline)
-
     for segment in segments:
         segment = segment.strip()
         if not segment:
             continue
-
-        # Strip redirects from the segment for command validation
         cmd_part = re.split(r"\s*(?:>>?|2>>?|<)\s*", segment)[0].strip()
         if not cmd_part:
             continue
-
         try:
             parts = shlex.split(cmd_part)
             if not parts:
                 continue
-            base_cmd = Path(parts[0]).name
         except ValueError:
             return f"Segmento malformado no pipeline: {segment}"
-
-        if base_cmd not in ALLOWED_COMMANDS:
-            return (
-                f"Comando '{base_cmd}' no pipeline não está permitido. "
-                f"Comandos permitidos: use execute_shell para ver a lista."
-            )
 
     return None
 
