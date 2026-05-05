@@ -117,6 +117,32 @@ def print_tool_call(name: str, args: dict, safety: str = "safe") -> None:
     print(f"  {icon} {tool_name}{args_str}")
 
 
+_TODO_STATUS_GLYPH = {
+    "pending": ("☐", C.GRAY),
+    "in_progress": ("◐", C.YELLOW),
+    "completed": ("☑", C.GREEN),
+    "cancelled": ("☒", C.RED_DARK),
+}
+
+
+def _print_todo_list(todos: list) -> None:
+    if not todos:
+        print(f"  {c(C.GRAY, '(empty todo list)')}")
+        return
+    for t in todos:
+        if not isinstance(t, dict):
+            continue
+        status = str(t.get("status", "pending"))
+        glyph, color = _TODO_STATUS_GLYPH.get(status, ("•", C.GRAY))
+        content = str(t.get("content", ""))
+        if len(content) > 200:
+            content = content[:197] + "..."
+        line_color = C.GRAY if status in ("completed", "cancelled") else C.WHITE
+        print(f"  {c(color, glyph)} {c(line_color, content)}")
+
+
+
+
 def print_tool_result(name: str, result: dict) -> None:
     """Display a tool result with status-aware formatting."""
     border = c(C.GRAY_DARK, "│")
@@ -131,6 +157,14 @@ def print_tool_result(name: str, result: dict) -> None:
         if result.get("skipped"):
             reason = result.get("reason", "denied")
             print(f"  {c(C.YELLOW, '⊘')} {c(C.YELLOW, reason[:200])}")
+            return
+
+        # todo_write — render checklist
+        if name == "todo_write" and isinstance(result.get("todos"), list):
+            _print_todo_list(result["todos"])
+            warning = result.get("warning")
+            if warning:
+                print(f"  {c(C.YELLOW, '⚠')} {c(C.YELLOW, warning)}")
             return
 
         # Show output/content preview
@@ -164,6 +198,22 @@ def reset_approve_all() -> None:
     _approve_all = False
 
 
+def _print_plan_card(args: dict) -> None:
+    """Pretty-print a present_plan approval card."""
+    summary = str(args.get("summary", ""))
+    steps = args.get("steps", []) or []
+    print()
+    print(f"  {c(C.YELLOW + C.BOLD, '┌─ PLANO PROPOSTO ─────────────────────')}")
+    print(f"  {c(C.YELLOW, '│')} {c(C.WHITE + C.BOLD, summary)}")
+    print(f"  {c(C.YELLOW, '│')}")
+    for i, step in enumerate(steps, start=1):
+        text = str(step)
+        if len(text) > 100:
+            text = text[:97] + "..."
+        print(f"  {c(C.YELLOW, '│')} {c(C.GRAY, f'{i:>2}.')} {text}")
+    print(f"  {c(C.YELLOW + C.BOLD, '└──────────────────────────────────────')}")
+
+
 def print_approval_request(tool_name: str, args: dict) -> bool:
     """Show approval request with Kali-style danger indication.
 
@@ -179,16 +229,19 @@ def print_approval_request(tool_name: str, args: dict) -> bool:
         print(f"  {c(C.GREEN, '✦')} {c(C.CYAN, tool_name)} {c(C.GREEN_DARK, '(auto-approved)')}")
         return True
 
-    print()
-    print(f"  {c(C.RED + C.BOLD, '┌─ APPROVAL NEEDED ─────────────────────')}")
-    print(f"  {c(C.RED, '│')} Tool: {c(C.CYAN + C.BOLD, tool_name)}")
-    if isinstance(args, dict):
-        for k, v in args.items():
-            val_str = str(v)
-            if len(val_str) > 100:
-                val_str = val_str[:97] + "..."
-            print(f"  {c(C.RED, '│')} {c(C.GRAY, k)}: {val_str}")
-    print(f"  {c(C.RED + C.BOLD, '└────────────────────────────────────────')}")
+    if tool_name == "present_plan":
+        _print_plan_card(args)
+    else:
+        print()
+        print(f"  {c(C.RED + C.BOLD, '┌─ APPROVAL NEEDED ─────────────────────')}")
+        print(f"  {c(C.RED, '│')} Tool: {c(C.CYAN + C.BOLD, tool_name)}")
+        if isinstance(args, dict):
+            for k, v in args.items():
+                val_str = str(v)
+                if len(val_str) > 100:
+                    val_str = val_str[:97] + "..."
+                print(f"  {c(C.RED, '│')} {c(C.GRAY, k)}: {val_str}")
+        print(f"  {c(C.RED + C.BOLD, '└────────────────────────────────────────')}")
 
     try:
         while True:
@@ -332,7 +385,7 @@ def print_banner(provider: str, model: str) -> None:
     print(f"  {c(C.GREEN_DARK, '│')} {c(C.WHITE + C.BOLD, 'ALPHA CODE')} {c(C.GRAY, '— Terminal Agent')}")
     print(f"  {c(C.GREEN_DARK, '│')} {c(C.GRAY, 'cwd:')} {c(C.GREEN, cwd)}")
     print(f"  {c(C.GREEN_DARK, '│')} {c(C.GRAY, 'provider:')} {c(C.CYAN, f'{provider} ({model})')}")
-    print(f"  {c(C.GREEN_DARK, '│')} {c(C.GRAY, 'Commands:')} /clear /history /continue /tools /help /exit")
+    print(f"  {c(C.GREEN_DARK, '│')} {c(C.GRAY, 'Commands:')} /clear /history /continue /tools /model /help /exit")
     print()
 
 
@@ -358,6 +411,32 @@ def print_sessions_list(sessions: list[dict]) -> None:
         count = c(C.BLUE, f'{s["message_count"]} msgs')
         preview = c(C.DIM, s.get("preview", ""))
         print(f"  {sid} {ts} ({count}) {preview}")
+
+
+def print_providers_list(
+    providers: list[dict],
+    *,
+    current: str | None = None,
+    default: str | None = None,
+    numbered: bool = False,
+) -> None:
+    """Render a provider list with unified formatting.
+
+    numbered=True prefixes rows with `1.`, `2.` (for startup picker).
+    current=<id> marks the active provider with a green dot.
+    default=<id> appends a gray `(default)` suffix.
+    """
+    for i, p in enumerate(providers, 1):
+        status = c(C.GREEN, "available") if p["available"] else c(C.RED, "no key")
+        tag = "" if p["supports_tools"] else c(C.YELLOW, "  chat-only")
+        if numbered:
+            prefix = f"{c(C.CYAN, str(i))}."
+        elif current is not None:
+            prefix = c(C.GREEN, "●") if p["id"] == current else " "
+        else:
+            prefix = " "
+        suffix = c(C.GRAY, " (default)") if default and p["id"] == default else ""
+        print(f"  {prefix} {c(C.CYAN, p['id']):15s} {p['model']:30s} {status}{tag}{suffix}")
 
 
 # ─── Thinking indicator (spinner) ───

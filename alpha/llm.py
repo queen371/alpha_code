@@ -26,6 +26,73 @@ MAX_BACKOFF = 30.0
 BACKOFF_MULTIPLIER = 2.0
 RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 
+# Smaller local models (Ollama-backed) hallucinate tool calls less often at
+# lower temperatures. Cloud models (DeepSeek, OpenAI, Grok) are robust enough
+# to keep the higher creative default.
+_LOW_TEMP_PROVIDERS = frozenset({"ollama", "gemma-12b", "gemma-27b"})
+_LOW_TEMPERATURE = 0.2
+
+
+def _recover_tool_call_from_content(content: str) -> dict | None:
+    """Recover a tool call from a content string when the model emitted it as
+    text instead of via the OpenAI ``tool_calls`` field.
+
+    Some Ollama-served models (notably qwen2.5-coder) occasionally drift into
+    code-completion mode and dump a tool call as a fenced JSON block. Returns
+    a tool_call dict matching the streamed format, or None if recovery isn't
+    safe/possible.
+    """
+    if not content:
+        return None
+    text = content.strip()
+    if not text:
+        return None
+
+    # Strip a single ``` or ```json fence wrapping the whole content.
+    if text.startswith("```"):
+        first_nl = text.find("\n")
+        if first_nl == -1:
+            return None
+        body = text[first_nl + 1 :]
+        if body.rstrip().endswith("```"):
+            body = body.rstrip()[:-3]
+        text = body.strip()
+
+    if not (text.startswith("{") and text.endswith("}")):
+        return None
+    try:
+        obj = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(obj, dict):
+        return None
+
+    # Accept the two common shapes models emit:
+    #   {"name": "X", "arguments": {...}}
+    #   {"function": {"name": "X", "arguments": {...}}}
+    fn = obj.get("function") if isinstance(obj.get("function"), dict) else {}
+    name = obj.get("name") or fn.get("name")
+    args = obj.get("arguments")
+    if args is None:
+        args = obj.get("parameters")
+    if args is None:
+        args = fn.get("arguments")
+    if not isinstance(name, str) or not name or args is None:
+        return None
+
+    if isinstance(args, dict):
+        args_str = json.dumps(args, ensure_ascii=False)
+    elif isinstance(args, str):
+        args_str = args
+    else:
+        return None
+
+    return {
+        "id": f"call_recovered_{abs(hash(name + args_str)) % 10**8:08x}",
+        "name": name,
+        "arguments": args_str,
+    }
+
 
 def _calc_backoff(attempt: int, retry_after: float | None = None) -> float:
     """Calculate backoff delay with exponential growth, jitter, capped at MAX_BACKOFF.
@@ -62,6 +129,27 @@ async def stream_chat_with_tools(
     base_url = cfg["base_url"]
     api_key = cfg["api_key"]
     model = cfg["model"]
+    supports_tools = cfg["supports_tools"]
+    api_format = cfg.get("api_format", "openai")
+
+    if provider in _LOW_TEMP_PROVIDERS and temperature > _LOW_TEMPERATURE:
+        temperature = _LOW_TEMPERATURE
+
+    if api_format == "anthropic":
+        from .llm_anthropic import stream_anthropic
+
+        tools_to_send = tools if tools and supports_tools else []
+        async for event in stream_anthropic(
+            messages=messages,
+            tools=tools_to_send,
+            temperature=temperature,
+            base_url=base_url,
+            api_key=api_key,
+            model=model,
+            timeout=LLM_TIMEOUT,
+        ):
+            yield event
+        return
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -73,7 +161,7 @@ async def stream_chat_with_tools(
         "stream": True,
         "temperature": temperature,
     }
-    if tools:
+    if tools and supports_tools:
         payload["tools"] = tools
 
     last_error = None
@@ -197,12 +285,27 @@ async def stream_chat_with_tools(
                     "error": None,
                 }
             else:
-                yield {
-                    "type": "final",
-                    "content": accumulated_content,
-                    "tool_calls": [],
-                    "error": None,
-                }
+                # Fallback: some models (Ollama qwen-coder etc.) emit tool calls
+                # as fenced JSON in content instead of via the tool_calls field.
+                recovered = _recover_tool_call_from_content(accumulated_content)
+                if recovered is not None:
+                    logger.info(
+                        f"Recovered tool call '{recovered['name']}' from content "
+                        f"(provider={provider})"
+                    )
+                    yield {
+                        "type": "final",
+                        "content": "",
+                        "tool_calls": [recovered],
+                        "error": None,
+                    }
+                else:
+                    yield {
+                        "type": "final",
+                        "content": accumulated_content,
+                        "tool_calls": [],
+                        "error": None,
+                    }
             return  # success, no retry
 
         except httpx.TimeoutException:

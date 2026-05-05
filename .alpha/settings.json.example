@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "read_file",
+      "list_directory",
+      "execute_shell:^npm (test|run|ci|install)"
+    ],
+    "deny": [
+      "execute_shell:rm -rf",
+      "execute_shell:sudo",
+      "execute_shell:curl.*\\|.*sh"
+    ]
+  },
+
+  "hooks": {
+    "pre_tool": [
+      {
+        "matcher": "write_file|edit_file",
+        "command": "echo \"[$(date +%T)] $ALPHA_TOOL_NAME → $ALPHA_TOOL_ARGS_JSON\" >> /tmp/alpha-audit.log"
+      }
+    ],
+
+    "post_tool": [
+      {
+        "matcher": "write_file",
+        "command": "if [ -n \"${ALPHA_TOOL_ARGS_JSON}\" ]; then path=$(printf '%s' \"$ALPHA_TOOL_ARGS_JSON\" | python3 -c 'import sys,json;print(json.load(sys.stdin).get(\"path\",\"\"))'); [ -n \"$path\" ] && [ -f \"$path\" ] && ruff check \"$path\" || true; fi"
+      }
+    ],
+
+    "on_user_prompt": [
+      {
+        "command": "echo \"$ALPHA_USER_PROMPT\" >> /tmp/alpha-prompts.log"
+      }
+    ],
+
+    "on_stop": [
+      {
+        "command": "notify-send 'Alpha session ended' || true"
+      }
+    ]
+  }
+}

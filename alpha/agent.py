@@ -10,7 +10,7 @@ import logging
 from collections.abc import AsyncGenerator
 from difflib import SequenceMatcher
 
-from .approval import needs_approval
+from .approval import is_denied, needs_approval
 from .config import MAX_ITERATIONS
 from .context import (
     compress_context,
@@ -301,6 +301,7 @@ async def run_agent(
                 final_event["tool_calls"],
                 messages,
                 needs_approval_fn=needs_approval,
+                is_denied_fn=is_denied,
                 approval_callback=approval_callback,
                 get_tool_fn=get_tool_fn,
                 workspace=workspace,

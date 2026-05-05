@@ -33,6 +33,13 @@ _PROVIDERS = {
         "model_env": "OPENAI_MODEL",
         "default_model": "gpt-4o",
     },
+    "anthropic": {
+        "base_url": os.getenv("ANTHROPIC_API_BASE_URL", "https://api.anthropic.com/v1"),
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "model_env": "ANTHROPIC_MODEL",
+        "default_model": "claude-sonnet-4-6",
+        "api_format": "anthropic",
+    },
     "grok": {
         "base_url": os.getenv("GROK_API_BASE_URL", "https://api.x.ai/v1"),
         "api_key_env": "GROK_API_KEY",
@@ -43,7 +50,21 @@ _PROVIDERS = {
         "base_url": os.getenv("OLLAMA_API_BASE_URL", "http://localhost:11434/v1"),
         "api_key_env": None,
         "model_env": "OLLAMA_MODEL",
-        "default_model": "qwen2.5-coder:14b",
+        "default_model": "qwen-heavy-abliterated:32b",
+    },
+    "gemma-12b": {
+        "base_url": os.getenv("OLLAMA_API_BASE_URL", "http://localhost:11434/v1"),
+        "api_key_env": None,
+        "model_env": "OLLAMA_GEMMA_12B_MODEL",
+        "default_model": "gemma3:12b",
+        "supports_tools": False,
+    },
+    "gemma-27b": {
+        "base_url": os.getenv("OLLAMA_API_BASE_URL", "http://localhost:11434/v1"),
+        "api_key_env": None,
+        "model_env": "OLLAMA_GEMMA_27B_MODEL",
+        "default_model": "gemma3:27b",
+        "supports_tools": False,
     },
 }
 
@@ -74,8 +95,16 @@ def get_provider_config(provider: str) -> dict:
         api_key = "ollama"
 
     model = os.getenv(cfg.get("model_env", ""), cfg["default_model"])
+    supports_tools = cfg.get("supports_tools", True)
+    api_format = cfg.get("api_format", "openai")
 
-    return {"base_url": base_url, "api_key": api_key, "model": model}
+    return {
+        "base_url": base_url,
+        "api_key": api_key,
+        "model": model,
+        "supports_tools": supports_tools,
+        "api_format": api_format,
+    }
 
 
 def get_available_providers() -> list[dict]:
@@ -86,7 +115,12 @@ def get_available_providers() -> list[dict]:
         if cfg["api_key_env"]:
             available = bool(os.getenv(cfg["api_key_env"], ""))
         model = os.getenv(cfg.get("model_env", ""), cfg["default_model"])
-        result.append({"id": name, "model": model, "available": available})
+        result.append({
+            "id": name,
+            "model": model,
+            "available": available,
+            "supports_tools": cfg.get("supports_tools", True),
+        })
     return result
 
 

@@ -3,12 +3,18 @@ Auto-approval logic for Alpha Code.
 
 Determines which tool calls are safe to auto-execute and which need user approval.
 Extracted from CORA34's approval_logic.py with security fixes (V-001).
+
+User-defined `allow` / `deny` rules from `.alpha/settings.json` override the
+built-in defaults — see `_load_permission_rules` for the schema.
 """
 
 import logging
 import re
 import shlex
+from dataclasses import dataclass
 from pathlib import Path
+
+from .settings import find_config_file, read_json
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +33,7 @@ AUTO_APPROVE_TOOLS = frozenset(
         "project_overview",
         "run_tests",
         "web_search",
+        "todo_write",
         # Browser read-only / navigation
         "browser_open",
         "browser_close",
@@ -237,13 +244,161 @@ def _is_safe_pipeline(pipeline: str) -> bool:
     return True
 
 
+# ─── User-defined permission rules (from .alpha/settings.json) ───
+
+# Pattern syntax:
+#   "tool"                — match by tool name only (any args)
+#   "tool(literal)"       — primary arg equals "literal"
+#   "tool:regex"          — primary arg matches regex (search, not anchored)
+_RULE_PARSE = re.compile(r"^([a-zA-Z_][\w]*)(?:\(([^)]*)\)|:(.+))?$")
+
+# Per-tool primary arg name (used to match args against rule patterns).
+# Falls back to the first string value if the tool isn't listed here.
+_PRIMARY_ARG = {
+    "execute_shell": "command",
+    "execute_pipeline": "pipeline",
+    "read_file": "path",
+    "write_file": "path",
+    "edit_file": "path",
+    "list_directory": "path",
+    "search_files": "pattern",
+    "glob_files": "pattern",
+    "http_request": "url",
+    "git_operation": "action",
+    "query_database": "query",
+    "search_and_replace": "path",
+}
+
+
+@dataclass
+class PermissionRule:
+    raw: str
+    tool: str
+    literal: str | None = None
+    pattern: re.Pattern | None = None
+
+    def matches(self, tool_name: str, args: dict) -> bool:
+        if self.tool != tool_name:
+            return False
+        if self.literal is None and self.pattern is None:
+            return True  # tool-name-only rule
+        primary = _primary_arg_value(tool_name, args)
+        if primary is None:
+            return False
+        if self.literal is not None:
+            return primary == self.literal
+        return self.pattern.search(primary) is not None
+
+
+def _primary_arg_value(tool_name: str, args: dict) -> str | None:
+    if not isinstance(args, dict):
+        return None
+    key = _PRIMARY_ARG.get(tool_name)
+    if key and key in args:
+        val = args[key]
+        return str(val) if val is not None else None
+    for v in args.values():
+        if isinstance(v, str):
+            return v
+    return None
+
+
+def _parse_rule(raw: str) -> PermissionRule | None:
+    raw = raw.strip()
+    if not raw:
+        return None
+    m = _RULE_PARSE.match(raw)
+    if not m:
+        logger.warning("Invalid permission rule '%s' (skipped)", raw)
+        return None
+    tool, literal, pattern = m.group(1), m.group(2), m.group(3)
+    compiled = None
+    if pattern is not None:
+        try:
+            compiled = re.compile(pattern)
+        except re.error as e:
+            logger.warning("Invalid regex in rule '%s': %s (skipped)", raw, e)
+            return None
+    return PermissionRule(raw=raw, tool=tool, literal=literal, pattern=compiled)
+
+
+_rules_cached = False
+_allow_rules: list[PermissionRule] = []
+_deny_rules: list[PermissionRule] = []
+
+
+def _load_permission_rules() -> tuple[list[PermissionRule], list[PermissionRule]]:
+    """Read .alpha/settings.json's `permissions` block. Cached after first call.
+
+    Schema:
+    ```json
+    {
+      "permissions": {
+        "allow": ["read_file", "execute_shell:^npm "],
+        "deny":  ["execute_shell(rm -rf /)", "execute_shell:sudo"]
+      }
+    }
+    ```
+    """
+    global _rules_cached, _allow_rules, _deny_rules
+    if _rules_cached:
+        return _allow_rules, _deny_rules
+
+    settings_path = find_config_file("settings.json")
+    raw = read_json(settings_path, default={})
+    perms = raw.get("permissions") if isinstance(raw, dict) else None
+    if not isinstance(perms, dict):
+        _rules_cached = True
+        return [], []
+
+    allow = [r for r in (_parse_rule(s) for s in perms.get("allow") or []) if r]
+    deny = [r for r in (_parse_rule(s) for s in perms.get("deny") or []) if r]
+    _allow_rules, _deny_rules = allow, deny
+    _rules_cached = True
+    if allow or deny:
+        logger.info(
+            "Loaded %d allow / %d deny permission rule(s) from %s",
+            len(allow), len(deny), settings_path,
+        )
+    return allow, deny
+
+
+def reset_permission_cache() -> None:
+    """Force a re-read of permission rules. For tests."""
+    global _rules_cached, _allow_rules, _deny_rules
+    _rules_cached = False
+    _allow_rules = []
+    _deny_rules = []
+
+
+def is_denied(tool_name: str, args: dict) -> tuple[bool, str]:
+    """Check if a deny rule matches. Denied tools never prompt and never run."""
+    _, deny = _load_permission_rules()
+    for rule in deny:
+        if rule.matches(tool_name, args):
+            return True, f"Denied by permission rule: {rule.raw}"
+    return False, ""
+
+
+def _matches_allow(tool_name: str, args: dict) -> bool:
+    allow, _ = _load_permission_rules()
+    return any(rule.matches(tool_name, args) for rule in allow)
+
+
 def needs_approval(tool_name: str, args: dict) -> bool:
     """
     Determine if a tool call needs user approval.
 
-    Auto-approves safe tools and read-only operations.
-    Requires approval for destructive actions.
+    Resolution order:
+      1. User `allow` rule → False (auto-approve).
+      2. Built-in defaults below.
+
+    Deny rules are enforced upstream by the executor via `is_denied`; by the
+    time we reach this function, denied calls have already been short-circuited.
     """
+    if _matches_allow(tool_name, args):
+        return False
+
     if tool_name in AUTO_APPROVE_TOOLS:
         if tool_name == "write_file" and not args.get("content", "").strip():
             return True

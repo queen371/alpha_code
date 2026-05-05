@@ -39,11 +39,14 @@ class TestToolRegistry:
         assert get_tool("delegate_task") is not None
         assert get_tool("delegate_parallel") is not None
 
-    def test_delegate_tools_are_safe(self):
+    def test_delegate_tools_are_destructive(self):
+        # Sub-agents can spawn long-running work and trigger destructive
+        # operations through the main agent's tool surface, so delegation
+        # itself is gated as destructive (require approval).
         dt = get_tool("delegate_task")
         dp = get_tool("delegate_parallel")
-        assert dt.safety == ToolSafety.SAFE
-        assert dp.safety == ToolSafety.SAFE
+        assert dt.safety == ToolSafety.DESTRUCTIVE
+        assert dp.safety == ToolSafety.DESTRUCTIVE
 
     def test_delegate_tools_in_agent_category(self):
         dt = get_tool("delegate_task")

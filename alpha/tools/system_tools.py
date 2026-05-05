@@ -283,7 +283,14 @@ register_tool(
 register_tool(
     ToolDefinition(
         name="notify_user",
-        description="Enviar notificação ao usuário via desktop (notify-send) ou voz (TTS).",
+        description=(
+            "Send an OS-level desktop popup (notify-send) or TTS voice alert. "
+            "USE ONLY for asynchronous/background updates the user must see "
+            "outside the terminal (e.g. long task finished, error needs attention). "
+            "DO NOT use this to reply, greet, or chat with the user — for those, "
+            "respond with plain text instead. Never call this for greetings like "
+            "'oi', 'hi', 'hello', or to acknowledge messages."
+        ),
         parameters={
             "type": "object",
             "properties": {

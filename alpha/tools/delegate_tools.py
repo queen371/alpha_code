@@ -8,23 +8,53 @@ Supports single delegation (delegate_task) and parallel delegation
 import asyncio
 import json
 import logging
-import os
+import secrets
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from . import ToolDefinition, ToolSafety, register_tool
 from ..config import FEATURES
 from ..display import print_subagent_event
+from .workspace import AGENT_WORKSPACE
 
 logger = logging.getLogger(__name__)
 
 _SUBAGENT_PROMPT_PATH = Path(__file__).parent.parent.parent / "prompts" / "subagent.md"
+_SCRATCH_SUBDIR = Path(".alpha") / "runs"
 
 
 def _load_subagent_prompt() -> str:
     if _SUBAGENT_PROMPT_PATH.exists():
         return _SUBAGENT_PROMPT_PATH.read_text(encoding="utf-8")
     return "You are a focused sub-agent. Complete the delegated task using your tools."
+
+
+def _new_agent_id() -> str:
+    return f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(4)}"
+
+
+def _create_scratch_dir(parent_workspace: str, agent_id: str) -> Path:
+    # exist_ok=False — a same-id collision means two agents would share state;
+    # fail loudly instead of silently merging.
+    scratch = Path(parent_workspace) / _SCRATCH_SUBDIR / agent_id
+    scratch.parent.mkdir(parents=True, exist_ok=True)
+    scratch.mkdir(exist_ok=False)
+    return scratch
+
+
+def _snapshot_dir(path: Path) -> list[str]:
+    if not path.exists():
+        return []
+    files = []
+    for p in path.rglob("*"):
+        if p.is_file():
+            try:
+                p.stat()
+            except OSError:
+                continue
+            files.append(str(p.relative_to(path)))
+    return sorted(files)
 
 
 async def _run_subagent(
@@ -55,7 +85,13 @@ async def _run_subagent(
 
     max_iterations = feat.get("subagent_max_iterations", 15)
     agent_provider = provider or DEFAULT_PROVIDER
-    cwd = os.getcwd()
+    workspace_root = str(AGENT_WORKSPACE)
+
+    agent_id = _new_agent_id()
+    try:
+        scratch_dir = _create_scratch_dir(workspace_root, agent_id)
+    except OSError as e:
+        return {"error": f"Cannot create scratch dir for sub-agent: {e}"}
 
     # Build isolated context for the sub-agent
     system_prompt = _load_subagent_prompt()
@@ -65,7 +101,13 @@ async def _run_subagent(
     if parent_messages:
         parent_context = _extract_relevant_context(parent_messages, task)
 
-    task_content = f"[CWD: {cwd}]\n"
+    task_content = (
+        f"[CWD: {workspace_root}]\n"
+        f"[AGENT_ID: {agent_id}]\n"
+        f"[SCRATCH_DIR: {scratch_dir}]\n"
+        "Write any artifacts, logs, or intermediate files to SCRATCH_DIR. "
+        "You may read anything under CWD.\n\n"
+    )
     if parent_context:
         task_content += (
             f"[CONTEXT FROM PARENT AGENT]\n{parent_context}\n"
@@ -129,6 +171,7 @@ async def _run_subagent(
             tools=tools,
             approval_callback=effective_approval,
             max_iterations=max_iterations,
+            workspace=workspace_root,
         ):
             if event["type"] == "token":
                 collected_text += event.get("text", "")
@@ -146,12 +189,16 @@ async def _run_subagent(
         logger.error(f"Sub-agent failed: {e}")
         return {"error": f"Sub-agent execution failed: {e}"}
 
-    # Return a concise summary instead of raw collected text
+    scratch_files = await asyncio.to_thread(_snapshot_dir, scratch_dir)
+
     result = {
         "status": "completed",
         "result": collected_text,
         "tools_used": tool_calls_made,
         "iterations": len(tool_calls_made),
+        "agent_id": agent_id,
+        "scratch_dir": str(scratch_dir),
+        "scratch_files": scratch_files,
     }
     if errors:
         result["errors"] = errors

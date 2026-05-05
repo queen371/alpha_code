@@ -12,12 +12,24 @@ import argparse
 import asyncio
 import atexit
 import json
+import logging
 import os
 import sys
 import textwrap
 
 from alpha.agents import AgentScope, get_agent, list_agents, load_all_agents
-from alpha.config import DEFAULT_PROVIDER, get_provider_config, load_system_prompt
+from alpha.config import (
+    DEFAULT_PROVIDER,
+    get_available_providers,
+    get_provider_config,
+    load_system_prompt,
+)
+from alpha import hooks
+from alpha.mcp import (
+    list_active_servers as list_mcp_servers,
+    load_mcp_servers,
+    shutdown_mcp_servers,
+)
 from alpha.skills import inject_skill_index, list_skills, load_all_skills
 from alpha.display import (
     C,
@@ -28,6 +40,7 @@ from alpha.display import (
     print_context_compressed,
     print_error,
     print_phase,
+    print_providers_list,
     print_sessions_list,
     print_tool_call,
     print_tool_result,
@@ -64,6 +77,12 @@ def _get_tools_for_agent(agent: AgentScope | None):
         from alpha.tools import get_openai_tools, get_tool, load_all_tools
 
         load_all_tools()
+        # MCP tools register into the same registry; load them after the
+        # built-in tools so a misbehaving MCP server can't shadow native ones.
+        try:
+            load_mcp_servers()
+        except Exception as e:
+            logging.getLogger(__name__).warning("MCP load failed: %s", e)
         if agent is not None and (agent.tools_allow or agent.tools_deny):
             tools = get_openai_tools(name_filter=agent.filter_tools)
         else:
@@ -71,6 +90,38 @@ def _get_tools_for_agent(agent: AgentScope | None):
         return get_tool, tools
     except ImportError:
         return None, []
+
+
+def _pick_provider_interactive(default: str) -> str:
+    """Prompt user to pick a provider at startup. Falls back to `default` on Enter/EOF."""
+    providers = get_available_providers()
+    print(c(C.CYAN + C.BOLD, "\nSelect a model / provider:"))
+    print_providers_list(providers, default=default, numbered=True)
+
+    while True:
+        try:
+            choice = input(c(C.GRAY, f"\n  Choice [1-{len(providers)}, Enter={default}]: ")).strip()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            return default
+        if not choice:
+            return default
+
+        pick = None
+        if choice.isdigit():
+            idx = int(choice) - 1
+            if 0 <= idx < len(providers):
+                pick = providers[idx]
+        else:
+            pick = next((p for p in providers if p["id"] == choice), None)
+
+        if pick is None:
+            print(c(C.RED, "  Invalid choice."))
+            continue
+        if not pick["available"]:
+            print(c(C.RED, f"  {pick['id']} not available — pick another."))
+            continue
+        return pick["id"]
 
 
 def _resolve_active_agent() -> AgentScope | None:
@@ -100,7 +151,25 @@ def _shutdown_browser_session():
         pass
 
 
+def _shutdown_mcp_servers():
+    """atexit hook: terminate any spawned MCP server subprocesses."""
+    try:
+        shutdown_mcp_servers()
+    except Exception:
+        pass
+
+
+def _fire_on_stop():
+    """atexit hook: fire user-defined on_stop hooks."""
+    try:
+        hooks.fire("on_stop", workspace=os.getcwd())
+    except Exception:
+        pass
+
+
+atexit.register(_fire_on_stop)
 atexit.register(_shutdown_browser_session)
+atexit.register(_shutdown_mcp_servers)
 
 
 async def _run_once(messages, user_message, provider, temperature, get_tool_fn, tools, workspace=None):
@@ -189,7 +258,9 @@ def run_repl(provider: str, temperature: float):
 
     get_tool_fn, tools = _get_tools_for_agent(active_agent)
 
-    if tools:
+    if not cfg["supports_tools"]:
+        print_phase(f"{c(C.YELLOW, 'chat-only')} — {provider} does not support tool-calling")
+    elif tools:
         print_phase(f"Loaded {len(tools)} tools")
     else:
         print_phase("No tools loaded — running in chat-only mode")
@@ -197,6 +268,13 @@ def run_repl(provider: str, temperature: float):
     skills_count = len(list_skills())
     if skills_count:
         print_phase(f"Loaded {skills_count} skills")
+
+    mcp_servers = list_mcp_servers()
+    if mcp_servers:
+        total_mcp_tools = sum(len(s["tools"]) for s in mcp_servers)
+        print_phase(
+            f"MCP: {len(mcp_servers)} server(s), {total_mcp_tools} tool(s)"
+        )
 
     if active_agent:
         print_phase(f"Active agent: {active_agent.name}")
@@ -255,8 +333,11 @@ def run_repl(provider: str, temperature: float):
                 print()
                 continue
 
-        # Commands
-        if user_input.startswith("/"):
+        # Commands — but only treat as a slash command if the first token is
+        # `/word` (no embedded slashes). Paths like `/home/...` fall through
+        # to normal input.
+        first_token = user_input.split(maxsplit=1)[0]
+        if user_input.startswith("/") and "/" not in first_token[1:]:
             parts = user_input.split()
             cmd = parts[0].lower()
             if cmd in ("/exit", "/quit", "/q"):
@@ -360,6 +441,15 @@ def run_repl(provider: str, temperature: float):
             elif cmd == "/tools":
                 print_tools_list(tools)
                 continue
+            elif cmd == "/mcp":
+                servers = list_mcp_servers()
+                if not servers:
+                    print(c(C.GRAY, "  No MCP servers connected. Configure .alpha/mcp.json"))
+                else:
+                    for s in servers:
+                        tool_names = ", ".join(s["tools"]) or c(C.GRAY, "(no tools)")
+                        print(f"  {c(C.CYAN, s['name']):30s} {tool_names}")
+                continue
             elif cmd == "/agents":
                 agents = list_agents()
                 if not agents:
@@ -404,6 +494,64 @@ def run_repl(provider: str, temperature: float):
                     print(f"  {c(C.GREEN, '✓')} Switched to agent: {name} "
                           f"({len(tools)} tools, provider={provider}, model={cfg['model']})")
                 continue
+            elif cmd == "/model":
+                providers_list = get_available_providers()
+
+                target = None
+                if len(parts) >= 2:
+                    target = parts[1]
+                else:
+                    print(f"  {c(C.GRAY, 'Current:')} {c(C.CYAN, provider)} → {cfg['model']}")
+                    print(f"  {c(C.GRAY, 'Available:')}")
+                    print_providers_list(providers_list, current=provider, numbered=True)
+                    try:
+                        choice = input(
+                            f"\n  {c(C.YELLOW + C.BOLD, f'Choose [1-{len(providers_list)}, Enter=cancel]:')} "
+                        ).strip()
+                    except (EOFError, KeyboardInterrupt):
+                        print()
+                        continue
+                    if not choice:
+                        continue
+                    target = choice
+
+                pick = None
+                if target.isdigit():
+                    idx = int(target) - 1
+                    if 0 <= idx < len(providers_list):
+                        pick = providers_list[idx]
+                else:
+                    pick = next((p for p in providers_list if p["id"] == target), None)
+
+                if pick is None:
+                    print_error(f"Provider not found: {target}")
+                    continue
+                if not pick["available"]:
+                    print_error(f"{pick['id']} is not available — set the API key first")
+                    continue
+
+                try:
+                    new_cfg = get_provider_config(pick["id"])
+                except RuntimeError as e:
+                    print_error(str(e))
+                    continue
+
+                provider = pick["id"]
+                cfg = new_cfg
+                if active_agent and active_agent.model:
+                    cfg["model"] = active_agent.model
+                # Reset conversation state so the new model starts clean.
+                # Otherwise prior turns aimed at a different provider can
+                # confuse smaller models (e.g. qwen-coder echoing template
+                # placeholders).
+                system_prompt = _build_system_prompt(active_agent)
+                messages[:] = [{"role": "system", "content": system_prompt}]
+                history.clear()
+                session_id = generate_session_id()
+                print(f"  {c(C.GREEN, '✓')} Switched to {c(C.CYAN, provider)} → {cfg['model']}")
+                if not cfg["supports_tools"]:
+                    print(f"  {c(C.YELLOW, '⚠')} {c(C.GRAY, 'chat-only mode — tools disabled for this model')}")
+                continue
             elif cmd == "/help":
                 print(f"  {c(C.CYAN, '/clear')}    — Clear history and screen")
                 print(f"  {c(C.CYAN, '/history')}  — Show conversation history")
@@ -412,8 +560,10 @@ def run_repl(provider: str, temperature: float):
                 print(f"  {c(C.CYAN, '/continue')} — Resume from last session")
                 print(f"  {c(C.CYAN, '/sessions')} — List saved sessions")
                 print(f"  {c(C.CYAN, '/tools')}    — List available tools")
+                print(f"  {c(C.CYAN, '/mcp')}      — List connected MCP servers")
                 print(f"  {c(C.CYAN, '/agents')}   — List named agents")
                 print(f"  {c(C.CYAN, '/agent')}    — Show/switch active agent")
+                print(f"  {c(C.CYAN, '/model')}    — Show/switch provider & model")
                 print(f"  {c(C.CYAN, '/exit')}     — Exit")
                 continue
             else:
@@ -423,6 +573,16 @@ def run_repl(provider: str, temperature: float):
         # Inject CWD context
         cwd = os.getcwd()
         contextualized = f"[CWD: {cwd}]\n{user_input}"
+
+        # User-prompt hook (non-blocking; output goes to stderr/log)
+        try:
+            hooks.fire(
+                "on_user_prompt",
+                user_prompt=user_input,
+                workspace=active_agent.workspace if active_agent else None,
+            )
+        except Exception:
+            pass
 
         messages.append({"role": "user", "content": contextualized})
         history.append({"role": "user", "content": user_input})
@@ -516,6 +676,11 @@ def main():
         action="store_true",
         help="Run the onboarding wizard (configure provider, API key, workspace)",
     )
+    parser.add_argument(
+        "--pick",
+        action="store_true",
+        help="Interactively choose the provider/model at startup (REPL only)",
+    )
 
     args = parser.parse_args()
 
@@ -525,12 +690,11 @@ def main():
         sys.exit(0 if run_wizard() else 1)
 
     if args.list_providers:
-        from alpha.config import get_available_providers
-
-        for p in get_available_providers():
-            status = c(C.GREEN, "available") if p["available"] else c(C.RED, "no key")
-            print(f"  {c(C.CYAN, p['id']):20s} {p['model']:30s} {status}")
+        print_providers_list(get_available_providers())
         return
+
+    if args.pick and not args.message:
+        args.provider = _pick_provider_interactive(args.provider)
 
     # Validate provider
     try:

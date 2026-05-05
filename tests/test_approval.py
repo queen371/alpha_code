@@ -15,11 +15,11 @@ class TestNeedsApproval:
     def test_require_approval_write_file_empty(self):
         assert needs_approval("write_file", {"path": "f.py", "content": ""}) is True
 
-    def test_auto_approve_delegate_task(self):
-        assert needs_approval("delegate_task", {"task": "do stuff"}) is False
+    def test_delegate_task_requires_approval(self):
+        assert needs_approval("delegate_task", {"task": "do stuff"}) is True
 
-    def test_auto_approve_delegate_parallel(self):
-        assert needs_approval("delegate_parallel", {"tasks": "[]"}) is False
+    def test_delegate_parallel_requires_approval(self):
+        assert needs_approval("delegate_parallel", {"tasks": "[]"}) is True
 
     def test_require_approval_install_package(self):
         assert needs_approval("install_package", {"package": "flask"}) is True
