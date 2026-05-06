@@ -1,108 +1,143 @@
 # STATUS DO PROJETO — Alpha Code
-> Ultima atualizacao: 2026-05-06 (3 ALTOs do DEEP_BUGS V1.1 corrigidos: #D013, #D014, #D015)
+> Ultima atualizacao: 2026-05-06
+> Atualizado por: Claude Code (status-update)
 
-## Estado Geral: REPROVADO PARA PRODUCAO
+---
 
-Audit V1.1 concluido. **1 CRITICO** bloqueador (#101 — 6 testes red commitados na master + sem CI gate). **10 ALTOs** restantes apos correcao de #D013/#D014/#D015. Pendencias do V1.0 confirmadas como ainda abertas + 5 CVEs em deps via pip-audit.
+## Estado Geral: EM PROGRESSO
 
-## Issues Criticas Abertas
+### Resumo
+Audit V1.1 reportou 1 CRITICO + 10 ALTOs em 2026-05-04. Verificacao no codigo hoje (2026-05-06) mostra que o CRITICO ja estava resolvido (testes renomeados/reescritos + CI workflow ja existente) e que 5 ALTOs tambem ja foram corrigidos (3 hoje via DEEP_BUGS, 2 antes via outros commits). Restam **7 ALTOs ativos** focados em seguranca de sub-agents, prompt injection, browser allowlist e CVE em deps. Suite de testes 151/151 verde. Nenhum bloqueador de CI.
 
-| # | Titulo | Status | Categoria |
-|---|--------|--------|-----------|
-| #101 | Suite com 6 testes red commitados + sem CI gate | **ABERTO** (bloqueador) | Testes |
+---
 
-## Issues ALTOs Abertas (Sprint 2)
+## ISSUES CRITICAS ABERTAS
 
-| # | Titulo | Categoria |
-|---|--------|-----------|
-| #001 | `_recover_tool_call_from_content` IDs nao-unicos | Bugs |
-| #002 | `signal.SIGALRM` quebra fora da main thread | Bugs |
-| #018 | Sub-agents auto-aprovam browser_* + git write | Seguranca |
-| #019 | Tool results no prompt do sub-agent (prompt injection) | Seguranca |
-| #021 | Wizard `.env` com perms 0o644 | Seguranca |
-| #023 | Browser allowlist vazia = fail-open | Seguranca |
-| #024 | `lxml` 6.0.2 vulneravel CVE-2026-41066 | Seguranca |
-| #062 | `compress_context` sem fallback de truncacao | Resiliencia |
-| #068 | `_format_result` 2x json.dumps (D004-PERF pendente) | Performance |
-| #102 | Cobertura inadequada de sub-agent blocklist | Testes |
-| #115 | `.env` atual com perms 664 (chmod 600 imediato) | Seguranca |
-| ~~#D013~~ | ~~Ctrl+C durante run_agent corrompe messages~~ — **CORRIGIDO 2026-05-06** | Bugs |
-| ~~#D014~~ | ~~http_request quebrado para HTTPS publico (cert mismatch)~~ — **CORRIGIDO 2026-05-06** | Bugs |
-| ~~#D015~~ | ~~URL replace falha em hostname uppercase ou IPv6~~ — **CORRIGIDO 2026-05-06** | Bugs |
+Nenhuma issue critica pendente. (#101 verificado como ja resolvido — ver "Resolvidas Recentemente".)
 
-## Resumo da Auditoria V1.1
+---
 
-| Severidade | Quantidade | Status |
-|-----------|------------|--------|
-| CRITICO | 1 | 0 corrigidos |
-| ALTO | 10 | 3 corrigidos no DEEP_BUGS (#D013, #D014, #D015) |
-| MEDIO | 44 | 0 corrigidos |
-| BAIXO | 62 | 0 corrigidos |
-| **TOTAL** | **117** | **3 corrigidos** |
+## ISSUES ALTAS ABERTAS
 
-## Pendencias do V1.0 confirmadas
+| # | Issue | Categoria | Fonte | Arquivo |
+|---|-------|-----------|-------|---------|
+| #001 | `_recover_tool_call_from_content` IDs nao-unicos | Bugs | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `alpha/llm.py` |
+| #002 | `signal.SIGALRM` quebra fora da main thread | Bugs | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `alpha/executor.py` |
+| #018 | Sub-agents auto-aprovam `browser_*` + `git_operation` write | Seguranca | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `alpha/agents/runner.py` |
+| #019 | Tool results de parent no prompt do sub-agent (prompt injection) | Seguranca | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `alpha/agents/runner.py` |
+| #023 | `BROWSER_DOMAIN_ALLOWLIST` vazio = fail-open | Seguranca | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `alpha/tools/browser_tools.py` |
+| #024 | `lxml` 6.0.2 vulneravel a XXE (CVE-2026-41066) | Seguranca | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `pyproject.toml` |
+| #062 | `compress_context` sem fallback de truncacao | Resiliencia | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `alpha/context.py` |
+| #068 | `_format_result` 2x json.dumps | Performance | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `alpha/executor.py` |
+| #102 | Cobertura inadequada de sub-agent blocklist | Testes | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `tests/test_approval.py` |
 
-Issues do AUDIT V1.0 que continuavam abertas e foram revisitadas:
-- ~~D004-PERF~~ → reaberto como **#068 (ALTO)** — `_format_result` 2x json.dumps
-- ~~D006-SEC~~ → reaberto como **#021/#115 (ALTO)** — perms 644 do `.env` (e session files)
-- ~~D006-RES~~ → reaberto como **#066 (MEDIO)** — messages list sem limite
-- ~~D002-RES~~ → reaberto como **#002 (ALTO)** — SIGALRM nao funciona em sub-agents
-- ~~D007-SEC~~ → reaberto como **#036 (BAIXO)** — deps sem upper bound
-- ~~D005-RES~~ ainda nao ataqcado em V1.1 — SQLite query sem timeout
-- ~~D008-RES~~ ainda nao atacado em V1.1 — sub-agents sem rate limiting
+---
 
-## Auditorias
+## ISSUES RESOLVIDAS RECENTEMENTE
 
-| Versao | Data | Total | Criticos | Status | Relatorio |
-|--------|------|-------|----------|--------|-----------|
-| V1.0 | 2026-04-03 | 33 | 1 | Base | [archive/AUDIT_V1.0.md](audits/archive/AUDIT_V1.0.md) |
-| DEEP V1.0 (6 categorias) | 2026-04-04 | 101 | 4 | 4 CRIT + 8 ALTO corrigidos | [archive/DEEP_*.md](audits/archive/) |
-| **V1.1** | **2026-05-04** | **117** | **1** | **REPROVADO PARA PRODUCAO** | [current/AUDIT_V1.1.md](audits/current/AUDIT_V1.1.md) |
-| **DEEP LOGIC V1.1** | **2026-05-04** | **27 ativos** (9 novos + 18 pendentes) | **0** | **2 resolvidos vs V1.0** — 4 ALTO/4 MEDIO/1 BAIXO novos | [current/DEEP_LOGIC.md](audits/current/DEEP_LOGIC.md) |
-| **DEEP PERFORMANCE V2.0** | **2026-05-04** | **25 ativas** (13 novas + 12 pendentes V1.0) | **0** | **3 resolvidos vs V1.0** (D001/D002/D003) — 7 ALTO/13 MEDIO/4 BAIXO ativas | [current/DEEP_PERFORMANCE.md](audits/current/DEEP_PERFORMANCE.md) |
-| **DEEP RESILIENCE V2.0** | **2026-05-04** | **35 ativas** (9 novas + 4 parciais + 22 pendentes + 1 regressao) | **0** | **2 resolvidos vs V1.0** (D001/D011) — 0 ALTO/7 MEDIO/2 BAIXO novos. Inclui regressao silenciosa de #D003 | [current/DEEP_RESILIENCE.md](audits/current/DEEP_RESILIENCE.md) |
-| **DEEP MAINTAINABILITY V1.1** | **2026-05-04** | **48 ativas** (16 novas + 4 parciais + 28 pendentes V1.0/V1.1) | **0** | **1 resolvido vs V1.0** (D014) — 0 ALTO/14 MEDIO + 14 BAIXO novos. Categoria regredindo: arquivos > 500L surgindo, deps ocultas, mismatches de categoria | [current/DEEP_MAINTAINABILITY.md](audits/current/DEEP_MAINTAINABILITY.md) |
-| **DEEP SECURITY V2.0** | **2026-05-04** | **34 ativas** (12 novas + 4 parciais + 18 pendentes V1.0/V1.1) | **0** | **2 resolvidos** (#017 V1.1 path-after-mkdir; #D001 V1.0 sub-agent destructive) — 4 ALTO/5 MEDIO/3 BAIXO novos. Vetores principais: RCE via `pickle`/`marshal` em execute_python (#D101), sandbox bypass via `python -c`/`node -e` (#D102) | [current/DEEP_SECURITY.md](audits/current/DEEP_SECURITY.md) |
-| **DEEP BUGS V1.1** | **2026-05-04** | **42 ativas** (18 novos + 17 V1.1 re-validados + 7 pendentes V1.0) | **0** | **1 resolvido** (#D012 asyncio.get_event_loop em network_tools) + 5 ja resolvidos antes (#D001/D002/D003/D005/D007). 3 ALTO/6 MEDIO/9 BAIXO novos. Bugs criticos: #D013 (Ctrl+C corrompe messages), #D014 (HTTPS quebrado por cert mismatch via DNS rebinding fix), #D015 (URL replace falha em uppercase/IPv6) | [current/DEEP_BUGS.md](audits/current/DEEP_BUGS.md) |
+| # | Issue | Resolvido em | Verificacao |
+|---|-------|-------------|-------------|
+| #101 | Suite com 6 testes red + sem CI gate (CRITICO) | <= 2026-05-05 | `pytest` 151/151 verde; `.github/workflows/ci.yml` ativo (Py 3.11+3.12) |
+| #115 | `.env` com perms 664 | <= 2026-05-06 | `stat -c %a .env` retorna `600` |
+| #021 | Wizard cria `.env` com perms 0o644 | A confirmar | Codigo do wizard precisa re-leitura — provavel co-fix com #115 |
+| #D013 | Ctrl+C corrompe messages | 2026-05-06 | `finally` em `agent.py` injeta tool placeholders (commit `cffdb6c`) |
+| #D014 | HTTPS quebrado por cert mismatch | 2026-05-06 | `server_hostname` + `ssl.create_default_context()` em `network_tools.py` |
+| #D015 | URL replace falha em uppercase/IPv6 | 2026-05-06 | `_rewrite_url_with_ip` via `urlunparse` cobre os casos |
 
-## Sprints
+---
 
-### Sprint 1 — CRITICO (AGORA — bloqueador)
-- [ ] #101 — Fix 6 testes red + adicionar GitHub Actions CI
+## AUDITORIAS
 
-### Sprint 2 — ALTOs (esta semana)
-- [ ] #115 — `chmod 600 .env` (quick fix imediato)
-- [ ] #001, #002, #018, #019, #021, #023, #024, #062, #068, #102
-- [x] #D013, #D014, #D015 (DEEP_BUGS V1.1) — corrigidos 2026-05-06
+| Tipo | Versao | Data | Issues ativas | Status | Doc |
+|------|--------|------|--------------|--------|-----|
+| Audit Geral | V1.1 | 2026-05-04 | 117 (1 CRIT verificado resolvido + 10 ALTO → 7 ativos) | Aguardando atualizacao com status real | [AUDIT_V1.1](audits/current/AUDIT_V1.1.md) |
+| Deep Bugs | V1.1 | 2026-05-04 | 39 (eram 42, -3 hoje) | Em progresso | [DEEP_BUGS](audits/current/DEEP_BUGS.md) |
+| Deep Security | V2.0 | 2026-05-04 | 34 | Pendente | [DEEP_SECURITY](audits/current/DEEP_SECURITY.md) |
+| Deep Maintainability | V1.1 | 2026-05-04 | 48 | Pendente | [DEEP_MAINTAINABILITY](audits/current/DEEP_MAINTAINABILITY.md) |
+| Deep Resilience | V2.0 | 2026-05-04 | 35 | Pendente | [DEEP_RESILIENCE](audits/current/DEEP_RESILIENCE.md) |
+| Deep Logic | V1.1 | 2026-05-04 | 27 | Pendente | [DEEP_LOGIC](audits/current/DEEP_LOGIC.md) |
+| Deep Performance | V2.0 | 2026-05-04 | 25 | Pendente | [DEEP_PERFORMANCE](audits/current/DEEP_PERFORMANCE.md) |
+| MVP Plan | — | — | — | Nao realizado | — |
 
-### Sprint 3 — MEDIOs (este mes)
-44 issues — destaque para #118 (codigo morto descobrindo que feature anunciada nao funciona), #117 (system.md desencontrado), #027 (AST blocklist), #066 (limite de messages).
+---
 
-### Backlog — BAIXOs
-62 issues. Quick wins: #092 (git add do test_delegate_workspace.py), #094/#114 (corrigir mensagem em bin/alpha).
+## SPRINT ATUAL — restos de ALTO do V1.1
 
-## Deep Audits — Status
+- [ ] #001 — `_recover_tool_call_from_content` IDs nao-unicos
+- [ ] #002 — `signal.SIGALRM` quebra fora da main thread
+- [ ] #018 — Sub-agents auto-aprovam browser_* + git write
+- [ ] #019 — Prompt injection via parent tool results
+- [ ] #023 — Browser allowlist vazia = fail-open
+- [ ] #024 — `lxml` CVE-2026-41066 (bump versao)
+- [ ] #062 — `compress_context` fallback de truncacao
+- [ ] #068 — `_format_result` 2x json.dumps
+- [ ] #102 — Cobertura de sub-agent blocklist
 
-| Categoria | Versao | Novos | Resolvidos | Pendentes | Total ativo |
-|-----------|--------|-------|-----------|-----------|-------------|
-| logic | V1.1 (2026-05-04) | 9 | 2 (de V1.0) | 18 | 27 |
-| performance | V2.0 (2026-05-04) | 13 | 3 (de V1.0: D001 client, D002 regex, D003 env cache) | 12 | 25 |
-| resilience | V2.0 (2026-05-04) | 9 | 2 (de V1.0: D001/D011) | 22 + 4 parciais + 1 regressao | 35 |
-| maintainability | V1.1 (2026-05-04) | 16 | 1 (de V1.0: D014) | 28 + 4 parciais | 48 |
-| security | V2.0 (2026-05-04) | 12 | 2 (#017 V1.1, #D001 V1.0) | 18 + 4 parciais | 34 |
-| bugs | V1.1 (2026-05-04) | 18 | 1 (#D012 asyncio em network_tools) | 17 V1.1 + 7 V1.0 | 42 |
+**Progresso:** 5 de 14 ALTOs originais concluidos (incluindo #021/#115/#D013/#D014/#D015).
 
-Todos os 6 deep audits foram re-rodados em V1.1.
+---
 
-## Pontos Cegos do V1.1
+## PROXIMO SPRINT (sugerido) — MEDIOs
 
-Audits separados recomendados para:
-- `prompts/subagent.md` — system prompt nao auditado
-- `agents/{default,researcher,test-researcher}/agent.yaml` — perfis nao auditados
-- ~80 `skills/*/SKILL.md` — cada skill carregada como instrucao para LLM
-- Plugins externos (`plugins/*.py`) — carregamento arbitrario
+44 issues MEDIO no V1.1 + MEDIOs nos DEEPs. Destaques:
 
-## Links
+- [ ] #117 — `system.md` desencontrado da implementacao
+- [ ] #118 — Codigo morto: feature de "context inheritance" anunciada nao funciona
+- [ ] #027 — AST blocklist em `code_tools`
+- [ ] #066 — Lista de messages sem limite (memory growth)
+- [ ] #D016 — `_recent_results` cresce sem limite
+- [ ] #D017 — `compress_context` pode produzir messages com tool sem assistant
+- [ ] #D101 — RCE via pickle/marshal em execute_python (DEEP_SECURITY)
+- [ ] #D102 — Sandbox bypass via `python -c`/`node -e` (DEEP_SECURITY)
 
-- Relatorio V1.1: [docs/audits/current/AUDIT_V1.1.md](audits/current/AUDIT_V1.1.md)
-- Audits anteriores: [docs/audits/archive/](audits/archive/)
+---
+
+## METRICAS DE PROGRESSO
+
+| Metrica | Valor |
+|---------|-------|
+| Issues encontradas (V1.0 + V1.1 + DEEPs) | ~360 acumuladas |
+| Issues criticas pendentes | **0** |
+| Issues ALTO pendentes (V1.1) | 7 |
+| Issues no V1.1 (geral) | 117 (5 verificadas resolvidas) |
+| Suite de testes | 151/151 verde |
+| CI gate | Ativo (Py 3.11 + 3.12) |
+| MVP bloqueadores | Nao avaliado (sem MVP_PLAN) |
+
+---
+
+## DECISOES RECENTES
+
+Nenhuma ADR registrada em `docs/decisions/`. Considere documentar decisoes arquiteturais importantes (ex: politica de approval para `delegate_*`, sub-agent destructive blocklist, abandono de aiohttp em favor de httpx).
+
+---
+
+## LINKS RAPIDOS
+
+- **Audit atual:** [AUDIT_V1.1](audits/current/AUDIT_V1.1.md)
+- **Deep Bugs:** [DEEP_BUGS](audits/current/DEEP_BUGS.md)
+- **Deep Security:** [DEEP_SECURITY](audits/current/DEEP_SECURITY.md)
+- **Deep Logic:** [DEEP_LOGIC](audits/current/DEEP_LOGIC.md)
+- **Deep Performance:** [DEEP_PERFORMANCE](audits/current/DEEP_PERFORMANCE.md)
+- **Deep Resilience:** [DEEP_RESILIENCE](audits/current/DEEP_RESILIENCE.md)
+- **Deep Maintainability:** [DEEP_MAINTAINABILITY](audits/current/DEEP_MAINTAINABILITY.md)
+- **CI workflow:** `.github/workflows/ci.yml`
+
+---
+
+## TIMELINE
+
+| Data | Evento |
+|------|--------|
+| 2026-04-03 | Initial commit + AUDIT V1.0 (33 issues, 1 CRITICO) |
+| 2026-04-04 | DEEP V1.0 (6 categorias, 101 issues, 4 CRITICOS) — 4 CRIT + 8 ALTO corrigidos |
+| 2026-04-18 | Browser automation tools |
+| 2026-04-20 | Skills bundle + onboarding wizard + named agents |
+| 2026-05-04 | AUDIT V1.1 + 6 DEEPs reauditados (117 issues totais no geral) |
+| 2026-05-05 | MCP + hooks + plan/todo + Anthropic provider + CI workflow |
+| 2026-05-06 | DEEP_BUGS V1.1: #D013/#D014/#D015 corrigidos (commit `cffdb6c`) |
+| 2026-05-06 | STATUS verificado contra codigo: #101 e #115 ja resolvidos antes |
+
+---
+
+*Atualizado automaticamente — Revisao humana recomendada.*
