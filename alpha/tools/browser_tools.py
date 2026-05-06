@@ -220,14 +220,16 @@ async def _browser_screenshot(save_to: str | None = None, full_page: bool = Fals
     if err:
         return err
     try:
-        from ..config import AGENT_WORKSPACE
+        # Usar a fonte canonical (`tools.workspace.AGENT_WORKSPACE`, Path
+        # resolvida com forbidden-system-dir guard), nao a string vazia de
+        # `config.AGENT_WORKSPACE` que esta sendo removida (#D021-BUGS).
+        from .workspace import AGENT_WORKSPACE
 
         if not save_to:
             save_to = f"browser_screenshot_{int(time.time())}.png"
         path = Path(save_to)
         if not path.is_absolute():
-            base = Path(AGENT_WORKSPACE) if AGENT_WORKSPACE else Path.cwd()
-            path = base / save_to
+            path = Path(AGENT_WORKSPACE) / save_to
         path.parent.mkdir(parents=True, exist_ok=True)
         await page.screenshot(path=str(path), full_page=full_page)
         return {

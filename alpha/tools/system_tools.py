@@ -104,15 +104,27 @@ async def _clipboard_write(content: str) -> dict:
 
 
 async def _screenshot(region: str = "full") -> dict:
-    """Capture a screenshot."""
-    from pathlib import Path
+    """Capture a screenshot.
 
-    screenshot_dir = Path("/tmp/alpha_screenshots")
-    screenshot_dir.mkdir(exist_ok=True)
-
+    Per-user directory com perms 0o700 evita leak entre usuarios em hosts
+    compartilhados (#D020). Filename inclui `secrets.token_hex` alem do
+    timestamp para evitar colisao quando duas chamadas caem no mesmo
+    segundo (overwrite silencioso da mais antiga).
+    """
+    import os
+    import secrets
     import time
+    from pathlib import Path
+    import tempfile
 
-    filename = f"screenshot_{int(time.time())}.png"
+    screenshot_dir = Path(tempfile.gettempdir()) / f"alpha_screenshots_{os.getuid()}"
+    screenshot_dir.mkdir(mode=0o700, exist_ok=True)
+    try:
+        os.chmod(screenshot_dir, 0o700)
+    except OSError:
+        pass
+
+    filename = f"screenshot_{int(time.time())}_{secrets.token_hex(3)}.png"
     filepath = screenshot_dir / filename
 
     # Try different screenshot tools

@@ -136,7 +136,11 @@ def load_system_prompt() -> str:
 
 
 # ─── Agent Workspace ───
-AGENT_WORKSPACE = os.getenv("AGENT_WORKSPACE", "")
+# Fonte canonical: `alpha.tools.workspace.AGENT_WORKSPACE` (Path resolvida
+# com forbidden-system-dir guard). A versao string-vazia que vivia aqui
+# era bug latente (#D021-BUGS) — qualquer `from .config import AGENT_WORKSPACE`
+# pegava uma string falsy enquanto `from .tools.workspace import ...` pegava
+# o Path real. Importe direto de `alpha.tools.workspace`.
 
 # ─── Feature Flags (used by tool modules) ───
 FEATURES: dict = {

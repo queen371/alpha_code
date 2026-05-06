@@ -62,6 +62,12 @@ Nenhuma issue ALTO pendente do AUDIT_V1.1. (DEEPs ainda tem MEDIO/BAIXO em fila.
 | #D017-RES | Force-text ignora erros LLM | 2026-05-06 | Captura `forced_final.error` e yield error event explicito |
 | #D018-RES | `search_files` bloqueia event loop | 2026-05-06 | Wrap de I/O sync em `asyncio.to_thread(_scan)` |
 | #D019-RES | composite `_run_tool` sem timeout | 2026-05-06 | `asyncio.wait_for` com timeout derivado do `_SLOW_TOOLS`/`TOOL_EXECUTION_TIMEOUT` |
+| #D016-BUGS | `_recent_results` memory leak | 2026-05-06 | Co-fixed por #D014-RES (truncamento simetrico ao `_recent_calls`) |
+| #D017-BUGS | `compress_context` tool sem assistant | 2026-05-06 | Co-fixed por #DL012 (`_find_compressible_range` recua end) |
+| #D018-BUGS | `2>&1` rejeitado como path | 2026-05-06 | Pular FD references (`&1`, `&2`) em `_validate_redirect_paths` |
+| #D019-BUGS | Plugin name shadow stdlib | 2026-05-06 | `spec_from_file_location` com prefix `alpha_plugin_`; sem `sys.path.insert(0, ...)` |
+| #D020-BUGS | Screenshot dir compartilhado | 2026-05-06 | Per-user dir `alpha_screenshots_$UID` 0o700 + `secrets.token_hex` no filename |
+| #D021-BUGS | `AGENT_WORKSPACE` duplicada (string vazia + Path) | 2026-05-06 | Removida em `config.py`; browser_tools re-apontado para `tools.workspace` |
 
 ---
 

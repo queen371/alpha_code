@@ -126,22 +126,39 @@ def _discover_plugins():
     if not plugins_dir.is_dir():
         return
 
-    import sys
-
-    if str(plugins_dir) not in sys.path:
-        sys.path.insert(0, str(plugins_dir))
+    # Carregar via `spec_from_file_location` com prefix `alpha_plugin_` em vez
+    # de `import_module(name)` + `sys.path.insert(0, ...)`. O esquema antigo
+    # poderia silenciosamente sombrear stdlib (plugin chamado `json.py` ou
+    # `os.py` viraria a importacao default em todo o processo) ou simplesmente
+    # carregar o stdlib em vez do plugin (priority de path).
+    import importlib.util
 
     for item in sorted(plugins_dir.iterdir()):
         if item.suffix == ".py" and not item.name.startswith("_"):
             module_name = item.stem
+            qualified = f"alpha_plugin_{module_name}"
             try:
-                importlib.import_module(module_name)
+                spec = importlib.util.spec_from_file_location(qualified, item)
+                if spec is None or spec.loader is None:
+                    logger.error(f"Plugin {module_name}: no loader")
+                    continue
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
                 logger.info(f"Loaded plugin: {module_name}")
             except Exception as e:
                 logger.error(f"Failed to load plugin {module_name}: {e}")
         elif item.is_dir() and (item / "__init__.py").exists():
+            qualified = f"alpha_plugin_{item.name}"
+            init_path = item / "__init__.py"
             try:
-                importlib.import_module(item.name)
+                spec = importlib.util.spec_from_file_location(
+                    qualified, init_path, submodule_search_locations=[str(item)]
+                )
+                if spec is None or spec.loader is None:
+                    logger.error(f"Plugin package {item.name}: no loader")
+                    continue
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
                 logger.info(f"Loaded plugin package: {item.name}")
             except Exception as e:
                 logger.error(f"Failed to load plugin package {item.name}: {e}")
