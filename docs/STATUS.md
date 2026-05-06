@@ -24,7 +24,6 @@ Nenhuma issue critica pendente. (#101 verificado como ja resolvido — ver "Reso
 | #018 | Sub-agents auto-aprovam `browser_*` + `git_operation` write | Seguranca | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `alpha/agents/runner.py` |
 | #019 | Tool results de parent no prompt do sub-agent (prompt injection) | Seguranca | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `alpha/agents/runner.py` |
 | #023 | `BROWSER_DOMAIN_ALLOWLIST` vazio = fail-open | Seguranca | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `alpha/tools/browser_tools.py` |
-| #024 | `lxml` 6.0.2 vulneravel a XXE (CVE-2026-41066) | Seguranca | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `pyproject.toml` |
 | #062 | `compress_context` sem fallback de truncacao | Resiliencia | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `alpha/context.py` |
 | #068 | `_format_result` 2x json.dumps | Performance | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `alpha/executor.py` |
 | #102 | Cobertura inadequada de sub-agent blocklist | Testes | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `tests/test_approval.py` |
@@ -43,6 +42,7 @@ Nenhuma issue critica pendente. (#101 verificado como ja resolvido — ver "Reso
 | #D015 | URL replace falha em uppercase/IPv6 | 2026-05-06 | `_rewrite_url_with_ip` via `urlunparse` cobre os casos |
 | #001 | `_recover_tool_call_from_content` IDs nao-unicos | 2026-05-06 | `hashlib.sha1[:8]` em vez de `hash() % 10**8` (estavel entre processos) |
 | #002 | `signal.SIGALRM` quebra fora da main thread | 2026-05-06 | Validacao de regex complexity via `asyncio.create_subprocess_exec` + `wait_for` |
+| #024 | `lxml` 6.0.2 CVE-2026-41066 | 2026-05-06 | Pin `lxml>=6.1.0` em pyproject.toml + upgrade venv; `pip-audit` confirma |
 
 ---
 
@@ -68,12 +68,12 @@ Nenhuma issue critica pendente. (#101 verificado como ja resolvido — ver "Reso
 - [ ] #018 — Sub-agents auto-aprovam browser_* + git write
 - [ ] #019 — Prompt injection via parent tool results
 - [ ] #023 — Browser allowlist vazia = fail-open
-- [ ] #024 — `lxml` CVE-2026-41066 (bump versao)
+- [x] #024 — `lxml` CVE-2026-41066 (bump versao) (2026-05-06)
 - [ ] #062 — `compress_context` fallback de truncacao
 - [ ] #068 — `_format_result` 2x json.dumps
 - [ ] #102 — Cobertura de sub-agent blocklist
 
-**Progresso:** 7 de 14 ALTOs originais concluidos (#001/#002/#021/#101/#115/#D013/#D014/#D015).
+**Progresso:** 8 de 14 ALTOs originais concluidos (#001/#002/#021/#024/#101/#115/#D013/#D014/#D015).
 
 ---
 
@@ -98,7 +98,7 @@ Nenhuma issue critica pendente. (#101 verificado como ja resolvido — ver "Reso
 |---------|-------|
 | Issues encontradas (V1.0 + V1.1 + DEEPs) | ~360 acumuladas |
 | Issues criticas pendentes | **0** |
-| Issues ALTO pendentes (V1.1) | 5 |
+| Issues ALTO pendentes (V1.1) | 4 |
 | Issues no V1.1 (geral) | 117 (5 verificadas resolvidas) |
 | Suite de testes | 151/151 verde |
 | CI gate | Ativo (Py 3.11 + 3.12) |
