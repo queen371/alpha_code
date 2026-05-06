@@ -17,13 +17,34 @@ from .workspace import AGENT_WORKSPACE
 logger = logging.getLogger(__name__)
 
 
-async def _run_tool(name: str, **kwargs) -> dict:
-    """Execute a registered tool by name."""
+async def _run_tool(name: str, *, timeout: float | None = None, **kwargs) -> dict:
+    """Execute a registered tool by name.
+
+    Adiciona enforcement de timeout (TOOL_EXECUTION_TIMEOUT por default,
+    _SLOW_TOOL_TIMEOUT para tools registradas como slow). Sem isso, sub-tools
+    da composite hangam indefinidamente — o timeout do agent so corta apos
+    o cap do composite (300s), nao o do sub-tool.
+    """
+    from ..executor import (
+        TOOL_EXECUTION_TIMEOUT,
+        _SLOW_TOOL_TIMEOUT,
+        _SLOW_TOOLS,
+    )
+
     tool_def = get_tool(name)
     if not tool_def:
         return {"error": f"Tool '{name}' não encontrada no registry"}
+
+    if timeout is None:
+        timeout = _SLOW_TOOL_TIMEOUT if name in _SLOW_TOOLS else TOOL_EXECUTION_TIMEOUT
+
     try:
-        return await tool_def.executor(**kwargs)
+        return await asyncio.wait_for(tool_def.executor(**kwargs), timeout=timeout)
+    except (TimeoutError, asyncio.TimeoutError):
+        return {
+            "error": f"Tool '{name}' excedeu timeout de {timeout}s",
+            "timeout": True,
+        }
     except Exception as e:
         return {"error": f"Erro ao executar {name}: {e}"}
 

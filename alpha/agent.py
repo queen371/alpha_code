@@ -248,6 +248,10 @@ async def run_agent(
             ):
                 if event["type"] == "content_token":
                     yield {"type": "token", "text": event["token"]}
+                elif event["type"] == "stream_reset":
+                    # llm.py vai retentar; tokens ja yieldados sao da
+                    # tentativa abortada. Caller (REPL/main) pode limpar UI.
+                    yield event
                 elif event["type"] == "final":
                     final_event = event
 
@@ -322,13 +326,30 @@ async def run_agent(
                     ),
                 }
             )
+            forced_final = None
             async for event in stream_chat_with_tools(
                 messages, [], temperature, provider=provider
             ):
                 if event["type"] == "content_token":
                     yield {"type": "token", "text": event["token"]}
+                elif event["type"] == "stream_reset":
+                    yield event
                 elif event["type"] == "final":
-                    full_response += event.get("content", "")
+                    forced_final = event
+                    if event.get("content"):
+                        full_response += event["content"]
+
+            # Force-text path nao pode sumir com erro do LLM em silencio:
+            # o usuario veria reply vazio sem motivo. Propagar.
+            if forced_final and forced_final.get("error"):
+                yield {
+                    "type": "error",
+                    "message": (
+                        "Loop detection forced-text response also failed: "
+                        f"{forced_final['error']}"
+                    ),
+                }
+                return
 
             yield {"type": "done", "reply": full_response}
             return
@@ -356,6 +377,10 @@ async def run_agent(
                     result = event.get("result", {})
                     result_str = json.dumps(result, ensure_ascii=False, default=str)
                     _recent_results.append(result_str[:500])
+                    # Truncar para evitar leak de memoria em sessoes longas;
+                    # `_recent_calls` ja faz isso, `_recent_results` nao fazia.
+                    if len(_recent_results) > _CYCLE_WINDOW * 3:
+                        _recent_results[:] = _recent_results[-_CYCLE_WINDOW * 3:]
         except Exception as e:
             logger.error(f"Tool execution failed: {e}")
             yield {"type": "error", "message": f"Tool execution failed: {e}"}

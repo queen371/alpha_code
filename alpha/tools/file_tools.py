@@ -282,7 +282,6 @@ async def _search_files(pattern: str, path: str = ".", max_results: int = 50) ->
     if not p.exists():
         return {"error": f"Caminho não encontrado: {path}"}
 
-    results = []
     try:
         regex = re.compile(pattern, re.IGNORECASE)
     except re.error as e:
@@ -313,36 +312,41 @@ async def _search_files(pattern: str, path: str = ".", max_results: int = 50) ->
             "error": "Regex muito complexo (possível backtracking exponencial). Simplifique o padrão."
         }
 
-    for root, _dirs, files in os.walk(str(p)):
-        if len(results) >= max_results:
-            break
-        # Skip hidden/binary directories
-        _dirs[:] = [
-            d
-            for d in _dirs
-            if not d.startswith(".") and d not in ("node_modules", "__pycache__", ".venv", ".git")
-        ]
-        for fname in files:
-            if len(results) >= max_results:
+    # I/O sincrono (`os.walk`, `fpath.stat`, `fpath.read_text`) bloqueia o
+    # event loop. Em delegate_parallel onde 3 sub-agents compartilham loop,
+    # uma busca em projeto grande congela todos. Mover para thread.
+    def _scan() -> list[dict]:
+        out: list[dict] = []
+        for root, _dirs, files in os.walk(str(p)):
+            if len(out) >= max_results:
                 break
-            fpath = Path(root) / fname
-            if fpath.stat().st_size > 1_000_000:  # skip files > 1MB
-                continue
-            try:
-                text = fpath.read_text(errors="replace")
+            _dirs[:] = [
+                d for d in _dirs
+                if not d.startswith(".")
+                and d not in ("node_modules", "__pycache__", ".venv", ".git")
+            ]
+            for fname in files:
+                if len(out) >= max_results:
+                    break
+                fpath = Path(root) / fname
+                try:
+                    if fpath.stat().st_size > 1_000_000:
+                        continue
+                    text = fpath.read_text(errors="replace")
+                except (PermissionError, OSError):
+                    continue
                 for i, line in enumerate(text.splitlines(), 1):
                     if regex.search(line):
-                        results.append(
-                            {
-                                "file": str(fpath),
-                                "line": i,
-                                "content": line.strip()[:200],
-                            }
-                        )
-                        if len(results) >= max_results:
+                        out.append({
+                            "file": str(fpath),
+                            "line": i,
+                            "content": line.strip()[:200],
+                        })
+                        if len(out) >= max_results:
                             break
-            except (PermissionError, OSError):
-                continue
+        return out
+
+    results = await asyncio.to_thread(_scan)
 
     return {"pattern": pattern, "path": str(p), "matches": len(results), "results": results}
 

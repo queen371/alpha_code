@@ -157,10 +157,19 @@ async def _execute_pipe_chain(
                 cwd=cwd,
                 env=env,
             )
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                proc.communicate(),
-                timeout=timeout,
-            )
+            try:
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                    proc.communicate(),
+                    timeout=timeout,
+                )
+            except (TimeoutError, asyncio.CancelledError):
+                # Sem kill, o subprocess vira zumbi ate ESGOTAR PIDs.
+                proc.kill()
+                try:
+                    await proc.wait()
+                except Exception:
+                    pass
+                raise
             return (
                 proc.returncode,
                 (stdout_bytes or b"").decode(errors="replace"),
@@ -191,10 +200,18 @@ async def _execute_pipe_chain(
                 cwd=cwd,
                 env=env,
             )
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                proc.communicate(input=prev_output),
-                timeout=timeout,
-            )
+            try:
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                    proc.communicate(input=prev_output),
+                    timeout=timeout,
+                )
+            except (TimeoutError, asyncio.CancelledError):
+                proc.kill()
+                try:
+                    await proc.wait()
+                except Exception:
+                    pass
+                raise
             prev_output = stdout_bytes
             last_exit_code = proc.returncode
             if stderr_bytes:

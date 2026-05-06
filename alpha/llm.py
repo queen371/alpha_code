@@ -205,6 +205,8 @@ async def stream_chat_with_tools(
                                 f"LLM {last_error} (attempt {attempt + 1}/{MAX_RETRIES + 1}), "
                                 f"retrying in {delay:.1f}s"
                             )
+                            if accumulated_content:
+                                yield {"type": "stream_reset", "reason": last_error}
                             await asyncio.sleep(delay)
                             continue
 
@@ -321,6 +323,8 @@ async def stream_chat_with_tools(
                     f"{last_error} (attempt {attempt + 1}/{MAX_RETRIES + 1}), "
                     f"retrying in {delay:.1f}s"
                 )
+                if accumulated_content:
+                    yield {"type": "stream_reset", "reason": last_error}
                 await asyncio.sleep(delay)
                 continue
 
@@ -356,6 +360,8 @@ async def stream_chat_with_tools(
                     f"{last_error} (attempt {attempt + 1}/{MAX_RETRIES + 1}), "
                     f"retrying in {delay:.1f}s"
                 )
+                if accumulated_content:
+                    yield {"type": "stream_reset", "reason": last_error}
                 await asyncio.sleep(delay)
                 continue
 

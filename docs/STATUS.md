@@ -55,6 +55,13 @@ Nenhuma issue ALTO pendente do AUDIT_V1.1. (DEEPs ainda tem MEDIO/BAIXO em fila.
 | #D013-PERF | Loop detection O(N²) com SequenceMatcher | 2026-05-06 | Counter para exact + indexa por tool name; short-circuit em <threshold candidates |
 | #D015-PERF | `_get_shared_client` sem detect de loop morto | 2026-05-06 | Track `_client_loop`; recria quando `get_running_loop()` difere |
 | #D016-PERF | Lista messages sem hard cap | 2026-05-06 | `MAX_MESSAGES=500` em `needs_compression` (independente de tokens) |
+| #D013-RES | Pipeline subprocess zumbi em timeout | 2026-05-06 | `proc.kill()` + `await proc.wait()` nos 2 paths antes de re-raise |
+| #D014-RES | `_recent_results` sem truncamento | 2026-05-06 | Truncado para `_CYCLE_WINDOW * 3` (60) simetrico ao `_recent_calls` |
+| #D015-RES | LLM retry replays tokens | 2026-05-06 | Yield `stream_reset` event antes de retry; agent.py propaga ao caller |
+| #D016-RES | compress loop infinito | 2026-05-06 | Mitigado por #062 (fail-counter + hard truncate) |
+| #D017-RES | Force-text ignora erros LLM | 2026-05-06 | Captura `forced_final.error` e yield error event explicito |
+| #D018-RES | `search_files` bloqueia event loop | 2026-05-06 | Wrap de I/O sync em `asyncio.to_thread(_scan)` |
+| #D019-RES | composite `_run_tool` sem timeout | 2026-05-06 | `asyncio.wait_for` com timeout derivado do `_SLOW_TOOLS`/`TOOL_EXECUTION_TIMEOUT` |
 
 ---
 
