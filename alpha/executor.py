@@ -167,6 +167,59 @@ def _enforce_workspace(
     return validate_workspace_args(workspace, tool_name, args)
 
 
+def _parse_and_validate_args(
+    tc: dict, tool_def
+) -> tuple[dict | None, dict | None]:
+    """Parse JSON args do tool_call e validar contra o schema declarado.
+
+    Retorna `(args, None)` em sucesso, ou `(None, error_result)` em falha
+    — `error_result` ja e o dict pronto para virar `tool` message,
+    permitindo o modelo se auto-corrigir em vez de receber TypeError opaco.
+
+    Diferente da versao anterior (`args = {}` silencioso em JSONDecodeError),
+    qualquer falha vira feedback estruturado. Argumentos extras (fora do
+    schema) sao DESCARTADOS silenciosamente para evitar TypeError no `**args`
+    do executor — o modelo se auto-corrige na proxima iteracao se o resultado
+    indicar que campo faltou.
+    """
+    raw = tc.get("arguments", "")
+    try:
+        args = json.loads(raw) if raw else {}
+    except json.JSONDecodeError as e:
+        return None, {
+            "error": "Invalid JSON in tool arguments",
+            "detail": str(e),
+            "raw_preview": (raw or "")[:200],
+        }
+    if not isinstance(args, dict):
+        return None, {
+            "error": "Tool arguments must be a JSON object",
+            "got_type": type(args).__name__,
+        }
+
+    if tool_def is None:
+        return args, None
+
+    schema = getattr(tool_def, "parameters", None) or {}
+    properties = schema.get("properties") or {}
+    required = schema.get("required") or []
+
+    missing = [k for k in required if k not in args]
+    if missing:
+        return None, {
+            "error": "Tool args missing required fields",
+            "missing": missing,
+            "required": list(required),
+        }
+
+    # Filtrar campos fora do schema — chamada com `**args` faria TypeError
+    # se o tool nao declara **kwargs no executor.
+    if properties:
+        args = {k: v for k, v in args.items() if k in properties}
+
+    return args, None
+
+
 async def execute_tool_calls(
     tool_calls: list[dict],
     messages: list[dict],
@@ -201,21 +254,27 @@ async def execute_tool_calls(
 
     for tc in tool_calls:
         tool_name = tc["name"]
-        try:
-            args = json.loads(tc["arguments"])
-        except json.JSONDecodeError:
-            args = {}
-
         tool_def = get_tool_fn(tool_name) if get_tool_fn else None
 
         if tool_def is None:
             result = {"error": f"Unknown tool: {tool_name}"}
-            yield {"type": "tool_call", "name": tool_name, "args": args, "safety": "unknown"}
+            yield {"type": "tool_call", "name": tool_name, "args": {}, "safety": "unknown"}
             yield {"type": "tool_result", "name": tool_name, "result": result}
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc["id"],
                 "content": json.dumps(result, ensure_ascii=False),
+            })
+            continue
+
+        args, parse_error = _parse_and_validate_args(tc, tool_def)
+        if parse_error is not None:
+            yield {"type": "tool_call", "name": tool_name, "args": {}, "safety": "denied"}
+            yield {"type": "tool_result", "name": tool_name, "result": parse_error}
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc["id"],
+                "content": json.dumps(parse_error, ensure_ascii=False),
             })
             continue
 
@@ -322,22 +381,27 @@ async def _execute_sequential(
 ) -> AsyncGenerator[dict, None]:
     for tc in tool_calls:
         tool_name = tc["name"]
-
-        try:
-            args = json.loads(tc["arguments"])
-        except json.JSONDecodeError:
-            args = {}
-
         tool_def = get_tool_fn(tool_name) if get_tool_fn else None
 
         if tool_def is None:
             result = {"error": f"Unknown tool: {tool_name}"}
-            yield {"type": "tool_call", "name": tool_name, "args": args, "safety": "unknown"}
+            yield {"type": "tool_call", "name": tool_name, "args": {}, "safety": "unknown"}
             yield {"type": "tool_result", "name": tool_name, "result": result}
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc["id"],
                 "content": json.dumps(result, ensure_ascii=False),
+            })
+            continue
+
+        args, parse_error = _parse_and_validate_args(tc, tool_def)
+        if parse_error is not None:
+            yield {"type": "tool_call", "name": tool_name, "args": {}, "safety": "denied"}
+            yield {"type": "tool_result", "name": tool_name, "result": parse_error}
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc["id"],
+                "content": json.dumps(parse_error, ensure_ascii=False),
             })
             continue
 

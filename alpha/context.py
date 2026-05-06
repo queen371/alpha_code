@@ -156,12 +156,32 @@ def _find_compressible_range(
     Returns (start, end) indices. Protects:
     - Index 0: system prompt
     - Last `tail` messages (default PROTECTED_TAIL_MESSAGES)
+
+    Importante: a tail protegida nunca pode comecar com `role=tool` orfa
+    (assistant.tool_calls correspondente caiu dentro do range comprimido)
+    nem o range pode terminar entre `assistant.tool_calls` e suas `tool`
+    responses — ambos os casos sao rejeitados pela API com HTTP 400 apos
+    a compressao executar.
     """
     if len(messages) <= tail + 1:
         return (0, 0)  # nothing to compress
 
     start = 1  # skip system prompt
     end = len(messages) - tail
+    if end <= start:
+        return (0, 0)
+
+    # Recuar 'end' enquanto a primeira mensagem do tail for `role=tool`
+    # (orfa, sem o assistant.tool_calls correspondente acima).
+    while end < len(messages) and messages[end].get("role") == "tool":
+        end -= 1
+    # Recuar tambem se o range comprimido terminaria com assistant.tool_calls
+    # (cortando antes das tool responses dele).
+    while end > start and (
+        messages[end - 1].get("role") == "assistant"
+        and messages[end - 1].get("tool_calls")
+    ):
+        end -= 1
     if end <= start:
         return (0, 0)
     return (start, end)

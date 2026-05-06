@@ -48,6 +48,10 @@ Nenhuma issue ALTO pendente do AUDIT_V1.1. (DEEPs ainda tem MEDIO/BAIXO em fila.
 | #D102 | execute_shell auto-aprova `python -c`/`node -e` | 2026-05-06 | Novo `_INTERPRETER_EVAL_FLAGS` em approval.py rejeita interpretadores com flags de eval inline |
 | #D108 | pip 24.0 com CVEs adicionais (incl. RCE) | 2026-05-06 | pip 24.0 -> 26.1.1; `pip-audit` confirma 3 CVEs fechadas |
 | #D109 | History files com perms 0o644 (leak inter-usuario) | 2026-05-06 | `_atomic_write` 0o600 + dir 0o700 + O_NOFOLLOW; 5 testes |
+| #DL012 | `_find_compressible_range` tail orfa | 2026-05-06 | `end` recua enquanto encontra `tool` ou `assistant.tool_calls` na fronteira |
+| #DL013 | Executor sem validacao de args | 2026-05-06 | `_parse_and_validate_args` retorna error estruturado; extras filtrados |
+| #DL014 | `delegate_parallel` sem cap total | 2026-05-06 | `max_delegate_total_tasks=10` rejeita listas grandes antes de criar scratch dirs |
+| #DL019 | `save_session` corrupta tool_calls | 2026-05-06 | `_sanitize_for_save` remove orfas antes de persistir |
 
 ---
 
@@ -105,7 +109,7 @@ Nenhuma issue ALTO pendente do AUDIT_V1.1. (DEEPs ainda tem MEDIO/BAIXO em fila.
 | Issues criticas pendentes | **0** |
 | Issues ALTO pendentes (V1.1) | 0 |
 | Issues no V1.1 (geral) | 117 (5 verificadas resolvidas) |
-| Suite de testes | 201/201 verde |
+| Suite de testes | 215/215 verde |
 | CI gate | Ativo (Py 3.11 + 3.12) |
 | MVP bloqueadores | Nao avaliado (sem MVP_PLAN) |
 

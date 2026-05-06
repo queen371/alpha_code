@@ -50,12 +50,25 @@ class TestHistory:
 
     def test_tool_results_truncated(self):
         big_content = "x" * 5000
+        # Tool messages precisam ter um assistant.tool_calls correspondente
+        # (DEEP_LOGIC #DL019). Sanitizer drop-aria caso contrario.
         messages = [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "fake", "arguments": "{}"},
+                }],
+            },
             {"role": "tool", "tool_call_id": "c1", "content": big_content},
         ]
         save_session("test_003", messages)
         loaded = load_session("test_003")
-        assert len(loaded[0]["content"]) < 5000
+        # encontrar a tool message e verificar truncamento
+        tool_msg = next(m for m in loaded if m["role"] == "tool")
+        assert len(tool_msg["content"]) < 5000
 
     def test_list_sessions(self):
         save_session("test_a", [{"role": "user", "content": "[CWD: /tmp]\nhello"}])

@@ -146,6 +146,10 @@ FEATURES: dict = {
     "auto_delegate_parallel_groups": False,
     "max_parallel_agents": 3,
     "subagent_max_iterations": 15,
+    # Cap total de tarefas em delegate_parallel — `max_parallel_agents`
+    # controla concorrencia, nao total. Sem cap, o modelo pode submeter
+    # array de 100 tasks * 15 iteracoes = 1500 chamadas LLM silenciosas.
+    "max_delegate_total_tasks": 10,
 }
 
 # Alias for backward compatibility with tools that import ALPHA_FEATURES

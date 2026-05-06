@@ -267,6 +267,20 @@ async def _delegate_parallel(
     except json.JSONDecodeError as e:
         return {"error": f"Invalid JSON in tasks: {e}"}
 
+    # Cap total: max_parallel_agents so controla concorrencia, nao total.
+    # Sem cap, modelo pode submeter array de 100 tarefas — runaway de custo
+    # e disco (cada sub-agent gasta 15 iteracoes + scratch dir).
+    max_total = FEATURES.get("max_delegate_total_tasks", 10)
+    if len(task_list) > max_total:
+        return {
+            "error": (
+                f"Too many tasks ({len(task_list)}). Maximum is {max_total}. "
+                "Split into smaller batches or reconsider scope."
+            ),
+            "submitted": len(task_list),
+            "limit": max_total,
+        }
+
     max_parallel = FEATURES.get("max_parallel_agents", 3)
     semaphore = asyncio.Semaphore(max_parallel)
 

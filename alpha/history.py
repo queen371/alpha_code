@@ -105,6 +105,54 @@ def _build_session_summary(messages: list[dict]) -> str:
     return "\n".join(parts[-40:])  # keep last 40 entries max
 
 
+def _sanitize_for_save(messages: list[dict]) -> list[dict]:
+    """Remove tool_call/tool message tuples that ficaram orfas.
+
+    Cenario tipico: Ctrl+C entre o `assistant` que emite `tool_calls` e a
+    `tool` response correspondente. Sem sanitizacao, a sessao salva fica
+    com `assistant.tool_calls` sem responses (ou `tool` orfa) e o proximo
+    `/load` quebra com HTTP 400 porque a API valida o emparelhamento.
+
+    Estrategia:
+    - Drop `tool` messages cujo `tool_call_id` nao bate com nenhum
+      `assistant.tool_calls` anterior nao-respondido.
+    - Drop o ultimo `assistant.tool_calls` se nao tiver respostas
+      correspondentes ainda.
+    """
+    if not messages:
+        return messages
+
+    cleaned: list[dict] = []
+    pending_ids: set[str] = set()
+
+    for m in messages:
+        role = m.get("role")
+        if role == "assistant" and m.get("tool_calls"):
+            cleaned.append(m)
+            pending_ids = {tc.get("id") for tc in m["tool_calls"] if tc.get("id")}
+        elif role == "tool":
+            tc_id = m.get("tool_call_id")
+            if tc_id in pending_ids:
+                cleaned.append(m)
+                pending_ids.discard(tc_id)
+            # tool com id desconhecido: ja era orfa antes do save — drop.
+        else:
+            cleaned.append(m)
+
+    # Drop final assistant.tool_calls sem responses correspondentes.
+    if pending_ids:
+        for i in range(len(cleaned) - 1, -1, -1):
+            entry = cleaned[i]
+            if entry.get("role") == "assistant" and entry.get("tool_calls"):
+                if any(
+                    tc.get("id") in pending_ids
+                    for tc in entry["tool_calls"]
+                ):
+                    cleaned.pop(i)
+                    break
+    return cleaned
+
+
 def save_session(
     session_id: str, messages: list[dict], metadata: dict | None = None
 ) -> Path:
@@ -119,6 +167,9 @@ def save_session(
     Returns:
         Path to the saved file.
     """
+    # Sanitize first: remove orphan tool_calls/tool tuples (Ctrl+C race).
+    messages = _sanitize_for_save(messages)
+
     # Filter out system messages and truncate tool results for storage
     storable = []
     for msg in messages:
