@@ -22,7 +22,6 @@ Nenhuma issue critica pendente. (#101 verificado como ja resolvido — ver "Reso
 | # | Issue | Categoria | Fonte | Arquivo |
 |---|-------|-----------|-------|---------|
 | #019 | Tool results de parent no prompt do sub-agent (prompt injection) | Seguranca | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `alpha/agents/runner.py` |
-| #062 | `compress_context` sem fallback de truncacao | Resiliencia | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `alpha/context.py` |
 
 ---
 
@@ -44,6 +43,7 @@ Nenhuma issue critica pendente. (#101 verificado como ja resolvido — ver "Reso
 | #102 | Cobertura inadequada de sub-agent blocklist | 2026-05-06 | `tests/test_subagent_blocked.py` (10 testes); blocklist e gate de git agora a nivel de modulo |
 | #068 | `_format_result` 2x json.dumps | 2026-05-06 | Estimativa cheap + preview clipado por campo elimina o segundo dump e o corte unicode-corrompido |
 | #005 | Truncated JSON corrupted | 2026-05-06 | Co-fixed com #068 (preview por campo evita corte no meio de escape) |
+| #062 | `compress_context` sem fallback de truncacao | 2026-05-06 | Fail-counter (>=2 empty/exception) cai em `_hard_truncate` que poda tool orfas; 7 testes adicionados |
 
 ---
 
@@ -70,11 +70,11 @@ Nenhuma issue critica pendente. (#101 verificado como ja resolvido — ver "Reso
 - [ ] #019 — Prompt injection via parent tool results
 - [x] #023 — Browser allowlist vazia = fail-open (2026-05-06)
 - [x] #024 — `lxml` CVE-2026-41066 (bump versao) (2026-05-06)
-- [ ] #062 — `compress_context` fallback de truncacao
+- [x] #062 — `compress_context` fallback de truncacao (2026-05-06)
 - [x] #068 — `_format_result` 2x json.dumps (2026-05-06)
 - [x] #102 — Cobertura de sub-agent blocklist (2026-05-06)
 
-**Progresso:** 12 de 14 ALTOs originais concluidos (#001/#002/#018/#023/#024/#068/#101/#102/#115/#D013/#D014/#D015 + #021 verificado).
+**Progresso:** 13 de 14 ALTOs originais concluidos (#001/#002/#018/#023/#024/#062/#068/#101/#102/#115/#D013/#D014/#D015 + #021 verificado).
 
 ---
 
@@ -99,9 +99,9 @@ Nenhuma issue critica pendente. (#101 verificado como ja resolvido — ver "Reso
 |---------|-------|
 | Issues encontradas (V1.0 + V1.1 + DEEPs) | ~360 acumuladas |
 | Issues criticas pendentes | **0** |
-| Issues ALTO pendentes (V1.1) | 2 |
+| Issues ALTO pendentes (V1.1) | 1 |
 | Issues no V1.1 (geral) | 117 (5 verificadas resolvidas) |
-| Suite de testes | 161/161 verde |
+| Suite de testes | 168/168 verde |
 | CI gate | Ativo (Py 3.11 + 3.12) |
 | MVP bloqueadores | Nao avaliado (sem MVP_PLAN) |
 

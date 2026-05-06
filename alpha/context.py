@@ -25,6 +25,12 @@ CHARS_PER_TOKEN = 4
 # so the compression trigger fires before the model's real budget is hit.
 IMAGE_TOKEN_COST = 1500
 
+# Quantos retries de LLM-based compression antes de cair em truncacao crua.
+# >= este numero de empty-summary consecutivos -> hard truncate respeitando
+# tuplas assistant->tool. Reset quando uma compressao tem sucesso.
+_COMPRESS_FAIL_TRUNCATE_THRESHOLD = 2
+_compress_consecutive_failures = 0
+
 # Context window sizes per provider (conservative estimates leaving room for response)
 PROVIDER_CONTEXT_LIMITS: dict[str, int] = {
     "deepseek": 60_000,   # 64K context, reserve 4K for response
@@ -206,6 +212,24 @@ def build_compression_prompt(messages: list[dict], start: int, end: int) -> str:
     )
 
 
+def _hard_truncate(
+    messages: list[dict], start: int, end: int, keep_recent: int = 8
+) -> list[dict]:
+    """Drop a range of old messages without an LLM summary.
+
+    Fallback usado quando o LLM nao retorna sumario (provider outage, empty
+    response). Mantem `messages[0]` (system prompt) + os ultimos
+    `keep_recent` messages, removendo qualquer mensagem `role=tool` que
+    sobrar sem o assistant.tool_calls correspondente — caso contrario o
+    proximo request quebra com HTTP 400.
+    """
+    sys_msg = messages[0]
+    tail = list(messages[-keep_recent:]) if keep_recent > 0 else []
+    while tail and tail[0].get("role") == "tool":
+        tail.pop(0)
+    return [sys_msg] + tail
+
+
 async def compress_context(
     messages: list[dict],
     provider: str,
@@ -248,17 +272,43 @@ async def compress_context(
     ]
 
     # Call LLM without tools for summarization
+    global _compress_consecutive_failures
     summary = ""
-    async for event in stream_fn(compression_messages, [], 0.2, provider=provider):
-        if event["type"] == "content_token":
-            summary += event["token"]
-        elif event["type"] == "final":
-            if event.get("content"):
-                summary = event["content"]
+    try:
+        async for event in stream_fn(compression_messages, [], 0.2, provider=provider):
+            if event["type"] == "content_token":
+                summary += event["token"]
+            elif event["type"] == "final":
+                if event.get("content"):
+                    summary = event["content"]
+    except Exception as e:
+        logger.warning(f"Compression LLM call raised {type(e).__name__}: {e}")
+        summary = ""
 
     if not summary:
-        logger.warning("Compression produced empty summary — skipping")
+        _compress_consecutive_failures += 1
+        if _compress_consecutive_failures >= _COMPRESS_FAIL_TRUNCATE_THRESHOLD:
+            logger.warning(
+                f"Compression failed {_compress_consecutive_failures}x "
+                "consecutive — falling back to hard truncation"
+            )
+            new_messages = _hard_truncate(messages, start, end)
+            tokens_after = estimate_messages_tokens(new_messages)
+            logger.info(
+                f"Hard-truncated context: {tokens_before} -> {tokens_after} "
+                f"tokens ({len(messages) - len(new_messages)} messages dropped)"
+            )
+            messages[:] = new_messages
+            return messages
+        logger.warning(
+            f"Compression produced empty summary — skipping "
+            f"(failure {_compress_consecutive_failures}/"
+            f"{_COMPRESS_FAIL_TRUNCATE_THRESHOLD})"
+        )
         return messages
+
+    # Reset failure counter on successful summary
+    _compress_consecutive_failures = 0
 
     # Replace compressed messages with a single summary message
     summary_message = {
