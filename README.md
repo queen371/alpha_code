@@ -33,6 +33,29 @@ pip install -e ".[browser]"   # adds Playwright tools
 pip install -e ".[dev]"       # adds pytest
 ```
 
+## Update
+
+Pull the latest changes and reinstall (in case `pyproject.toml` added new dependencies):
+
+```bash
+cd Alpha_Code
+git pull origin master
+source .venv/bin/activate
+pip install -e . --upgrade
+```
+
+Restart the REPL afterwards (`/exit` then `alpha`/`python main.py` again). If `.env.example` gained new variables, run `diff .env.example .env` to spot what to copy over.
+
+To pin to a specific release tag instead of tracking `master`:
+
+```bash
+git fetch --tags
+git checkout v1.2.0          # any tag from `git tag -l "v*"`
+pip install -e . --upgrade
+```
+
+Run `git checkout master && git pull` to return to the rolling latest.
+
 ## Run
 
 ```bash
