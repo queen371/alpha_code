@@ -12,7 +12,10 @@ from urllib.parse import urlparse
 
 import httpx
 
-from .net_utils import is_private_ip as _is_private_ip
+from .net_utils import (
+    is_private_ip as _is_private_ip,
+    resolve_and_validate as _resolve_and_validate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -125,20 +128,45 @@ async def _get_shared_client() -> httpx.AsyncClient:
     return _shared_client
 
 
+def _build_pinned_url(parsed, resolved_ip: str) -> str:
+    """Reconstroi URL trocando hostname pelo IP resolvido (urlunparse para
+    cobrir uppercase + IPv6 em vez de str.replace fragil)."""
+    from urllib.parse import urlunparse
+
+    ip_for_url = f"[{resolved_ip}]" if ":" in resolved_ip else resolved_ip
+    netloc = f"{ip_for_url}:{parsed.port}" if parsed.port else ip_for_url
+    parts = list(parsed)
+    parts[1] = netloc
+    return urlunparse(parts)
+
+
 async def _fetch_raw(url: str, timeout: float, max_bytes: int) -> tuple[bytes, dict[str, str], int]:
     """
     Fetch raw bytes from URL using httpx.
     Returns (raw_bytes, headers_dict, status_code).
+
+    Pin de IP contra DNS rebinding (#D106-SEC): resolve hostname uma vez
+    via `_resolve_and_validate`, conecta no IP literal, e usa
+    `extensions={"sni_hostname": hostname}` para que cert/SNI continuem
+    validando contra o hostname original — mantendo HTTPS funcional.
     """
     parsed = urlparse(url)
     hostname = parsed.hostname or ""
-    if _is_private_ip(hostname):
-        logger.warning(f"SSRF blocked: {url} resolves to private/reserved IP")
+    if not hostname:
+        return b"", {}, 0
+
+    try:
+        resolved_ip = await _resolve_and_validate(hostname)
+    except ValueError as e:
+        logger.warning(f"SSRF blocked for {url}: {e}")
         return b"", {}, 0
 
     try:
         client = await _get_shared_client()
-        resp = await client.get(url, headers=_REQ_HEADERS)
+        pinned_url = _build_pinned_url(parsed, resolved_ip)
+        req_headers = {**_REQ_HEADERS, "Host": hostname}
+        ext = {"sni_hostname": hostname} if parsed.scheme == "https" else None
+        resp = await client.get(pinned_url, headers=req_headers, extensions=ext)
 
         # Manual redirect following with SSRF re-validation
         redirect_count = 0
@@ -148,10 +176,24 @@ async def _fetch_raw(url: str, timeout: float, max_bytes: int) -> tuple[bytes, d
                 break
             redirect_parsed = urlparse(location)
             redirect_host = redirect_parsed.hostname or ""
-            if _is_private_ip(redirect_host):
-                logger.warning(f"SSRF blocked: redirect to private IP: {location}")
+            if not redirect_host:
+                break
+            try:
+                redirect_ip = await _resolve_and_validate(redirect_host)
+            except ValueError as e:
+                logger.warning(f"SSRF blocked: redirect to {location}: {e}")
                 return b"", {}, 0
-            resp = await client.get(location, headers=_REQ_HEADERS)
+            pinned_redirect = _build_pinned_url(redirect_parsed, redirect_ip)
+            redirect_headers = {**_REQ_HEADERS, "Host": redirect_host}
+            redirect_ext = (
+                {"sni_hostname": redirect_host}
+                if redirect_parsed.scheme == "https" else None
+            )
+            resp = await client.get(
+                pinned_redirect,
+                headers=redirect_headers,
+                extensions=redirect_ext,
+            )
             redirect_count += 1
 
         if resp.status_code >= 400:

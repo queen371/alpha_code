@@ -227,9 +227,21 @@ async def _browser_screenshot(save_to: str | None = None, full_page: bool = Fals
 
         if not save_to:
             save_to = f"browser_screenshot_{int(time.time())}.png"
-        path = Path(save_to)
+
+        # Validar workspace mesmo quando save_to e absoluto. Antes,
+        # `path.is_absolute()` pulava a validacao e o modelo podia escrever
+        # em /etc/cron.d/foo.png ou ~/.ssh/known_hosts.png sobrescrevendo
+        # arquivos pessoais (#D105-SEC).
+        ws = Path(AGENT_WORKSPACE).resolve()
+        path = Path(save_to).expanduser()
         if not path.is_absolute():
-            path = Path(AGENT_WORKSPACE) / save_to
+            path = ws / path
+        path = path.resolve()
+        try:
+            path.relative_to(ws)
+        except ValueError:
+            return {"error": f"save_to fora do workspace permitido ({ws})"}
+
         path.parent.mkdir(parents=True, exist_ok=True)
         await page.screenshot(path=str(path), full_page=full_page)
         return {

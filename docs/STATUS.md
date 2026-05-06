@@ -68,6 +68,10 @@ Nenhuma issue ALTO pendente do AUDIT_V1.1. (DEEPs ainda tem MEDIO/BAIXO em fila.
 | #D019-BUGS | Plugin name shadow stdlib | 2026-05-06 | `spec_from_file_location` com prefix `alpha_plugin_`; sem `sys.path.insert(0, ...)` |
 | #D020-BUGS | Screenshot dir compartilhado | 2026-05-06 | Per-user dir `alpha_screenshots_$UID` 0o700 + `secrets.token_hex` no filename |
 | #D021-BUGS | `AGENT_WORKSPACE` duplicada (string vazia + Path) | 2026-05-06 | Removida em `config.py`; browser_tools re-apontado para `tools.workspace` |
+| #D103-SEC | `clipboard_read` SAFE auto-aprova | 2026-05-06 | Promovido para DESTRUCTIVE + adicionado ao subagent blocklist |
+| #D104-SEC | screenshot dir compartilhado | 2026-05-06 | Co-fixed por #D020-BUGS (per-user dir 0o700 + token_hex) |
+| #D105-SEC | `browser_screenshot` path absoluto | 2026-05-06 | Validacao de workspace mesmo em paths absolutos |
+| #D106-SEC | web_search DNS rebinding | 2026-05-06 | IP pinning via `_resolve_and_validate` + `extensions={sni_hostname}` |
 
 ---
 
@@ -125,7 +129,7 @@ Nenhuma issue ALTO pendente do AUDIT_V1.1. (DEEPs ainda tem MEDIO/BAIXO em fila.
 | Issues criticas pendentes | **0** |
 | Issues ALTO pendentes (V1.1) | 0 |
 | Issues no V1.1 (geral) | 117 (5 verificadas resolvidas) |
-| Suite de testes | 223/223 verde |
+| Suite de testes | 232/232 verde |
 | CI gate | Ativo (Py 3.11 + 3.12) |
 | MVP bloqueadores | Nao avaliado (sem MVP_PLAN) |
 
