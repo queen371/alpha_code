@@ -163,7 +163,9 @@ TOOL_TIMEOUTS: dict = {
 }
 
 # ─── Browser tool policies ───
-# Comma-separated env vars; empty list means "no restrictions".
+# Comma-separated env vars. By default, an empty allowlist still permits
+# qualquer dominio (compatibilidade) — definir ALPHA_BROWSER_REQUIRE_ALLOWLIST=1
+# torna a allowlist obrigatoria (allowlist vazia => bloqueia tudo).
 BROWSER_DOMAIN_ALLOWLIST: list[str] = [
     d.strip().lower()
     for d in os.getenv("ALPHA_BROWSER_ALLOWLIST", "").split(",")
@@ -174,3 +176,14 @@ BROWSER_DOMAIN_BLOCKLIST: list[str] = [
     for d in os.getenv("ALPHA_BROWSER_BLOCKLIST", "").split(",")
     if d.strip()
 ]
+BROWSER_REQUIRE_ALLOWLIST: bool = os.getenv(
+    "ALPHA_BROWSER_REQUIRE_ALLOWLIST", ""
+).strip().lower() in ("1", "true", "yes", "on")
+
+if not BROWSER_DOMAIN_ALLOWLIST and not BROWSER_REQUIRE_ALLOWLIST:
+    import logging as _logging
+    _logging.getLogger(__name__).warning(
+        "ALPHA_BROWSER_ALLOWLIST esta vazia (browser tools aceitam qualquer "
+        "dominio). Defina ALPHA_BROWSER_ALLOWLIST=dominio1,dominio2 ou "
+        "ALPHA_BROWSER_REQUIRE_ALLOWLIST=1 para reduzir vetor de exfil."
+    )

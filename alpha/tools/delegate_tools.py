@@ -128,6 +128,10 @@ async def _run_subagent(
     _destructive_without_approval = {
         "execute_shell", "execute_pipeline", "http_request",
         "query_database", "clipboard_write", "install_package",
+        # Browser interaction — JS execution, form fill e click podem
+        # exfiltrar cookies/tokens da sessao logada do navegador.
+        "browser_click", "browser_fill", "browser_select_option",
+        "browser_press_key", "browser_execute_js",
     }
     all_tools = get_openai_tools()
     if parent_approval_callback is None:
@@ -158,8 +162,22 @@ async def _run_subagent(
     errors = []
 
     # Sub-agents use parent's approval callback if available,
-    # otherwise auto-approve only safe tools (destructive ones are blocked above)
-    effective_approval = parent_approval_callback or (lambda name, args: True)
+    # otherwise auto-approve only safe tools (destructive ones are blocked above).
+    # git_operation needs args-aware gating: read actions (status/log/diff/...)
+    # are auto-approved, write actions (push/merge/rebase/reset/clean/...) are
+    # rejected when no human callback is wired. Removing the tool entirely
+    # would break sub-agents that just want to inspect repo state.
+    _GIT_READ_ACTIONS = {
+        "status", "diff", "log", "branch", "show", "blame",
+        "stash_list", "remote", "tag",
+    }
+
+    def _auto_approve_no_callback(name: str, args: dict) -> bool:
+        if name == "git_operation":
+            return (args or {}).get("action") in _GIT_READ_ACTIONS
+        return True
+
+    effective_approval = parent_approval_callback or _auto_approve_no_callback
 
     try:
         async for event in run_agent(

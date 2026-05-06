@@ -36,7 +36,11 @@ def _check_available() -> dict | None:
 
 
 def _domain_allowed(url: str) -> str | None:
-    from ..config import BROWSER_DOMAIN_ALLOWLIST, BROWSER_DOMAIN_BLOCKLIST
+    from ..config import (
+        BROWSER_DOMAIN_ALLOWLIST,
+        BROWSER_DOMAIN_BLOCKLIST,
+        BROWSER_REQUIRE_ALLOWLIST,
+    )
 
     host = (urlparse(url).hostname or "").lower()
     for blocked in BROWSER_DOMAIN_BLOCKLIST:
@@ -47,6 +51,12 @@ def _domain_allowed(url: str) -> str | None:
             if host == allowed or host.endswith("." + allowed):
                 return None
         return f"Domínio '{host}' fora da allowlist"
+    # Allowlist vazia: fail-closed se o operador exigir allowlist explicita.
+    if BROWSER_REQUIRE_ALLOWLIST:
+        return (
+            "Allowlist vazia e ALPHA_BROWSER_REQUIRE_ALLOWLIST=1: defina "
+            "ALPHA_BROWSER_ALLOWLIST=dominio1,dominio2 antes de navegar."
+        )
     return None
 
 
