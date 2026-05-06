@@ -35,7 +35,16 @@ pip install -e ".[dev]"       # adds pytest
 
 ## Update
 
-Pull the latest changes and reinstall (in case `pyproject.toml` added new dependencies):
+Easiest path — the bundled `alpha-update` script handles pull + reinstall + diff of `.env.example`:
+
+```bash
+alpha-update              # jumps to latest master
+alpha-update v1.2.0       # pins to a specific release tag
+```
+
+Restart the REPL afterwards (`/exit` then `alpha` again).
+
+Manual equivalent if you prefer:
 
 ```bash
 cd Alpha_Code
@@ -44,7 +53,7 @@ source .venv/bin/activate
 pip install -e . --upgrade
 ```
 
-Restart the REPL afterwards (`/exit` then `alpha`/`python main.py` again). If `.env.example` gained new variables, run `diff .env.example .env` to spot what to copy over.
+If `.env.example` gained new variables, run `diff .env.example .env` to spot what to copy over.
 
 To pin to a specific release tag instead of tracking `master`:
 

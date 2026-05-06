@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Alpha Code — atualiza o repo + dependencias num comando so.
+# Uso: alpha-update           (pula pra master mais recente)
+#      alpha-update v1.2.0    (fixa numa tag especifica)
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+VENV_PY="$PROJECT_DIR/.venv/bin/python"
+TARGET="${1:-master}"
+
+cd "$PROJECT_DIR"
+
+if [ ! -x "$VENV_PY" ]; then
+    echo "Erro: venv nao encontrado em $PROJECT_DIR/.venv"
+    echo "Cria com: python3 -m venv .venv && source .venv/bin/activate && pip install -e ."
+    exit 1
+fi
+
+echo "→ Atualizando Alpha em $PROJECT_DIR"
+echo
+
+OLD_HEAD="$(git rev-parse --short HEAD)"
+
+git fetch --tags origin
+
+if git show-ref --verify --quiet "refs/tags/$TARGET"; then
+    echo "→ Checkout na tag $TARGET"
+    git checkout "$TARGET"
+elif [ "$TARGET" = "master" ] || [ "$TARGET" = "main" ]; then
+    git checkout "$TARGET" 2>/dev/null || true
+    git pull --ff-only origin "$TARGET"
+else
+    echo "→ Checkout em $TARGET (branch ou commit)"
+    git checkout "$TARGET"
+fi
+
+NEW_HEAD="$(git rev-parse --short HEAD)"
+
+if [ "$OLD_HEAD" = "$NEW_HEAD" ]; then
+    echo "✓ Ja estava na versao mais recente ($NEW_HEAD)"
+    exit 0
+fi
+
+echo
+echo "→ Reinstalando dependencias"
+"$VENV_PY" -m pip install -e . --upgrade --quiet
+
+echo
+echo "→ Diferencas entre .env.example e .env (variaveis novas):"
+if [ -f .env ]; then
+    diff <(grep -oE '^[A-Z_]+=' .env.example 2>/dev/null | sort -u) \
+         <(grep -oE '^[A-Z_]+=' .env 2>/dev/null | sort -u) \
+        | grep '^<' | sed 's/^< /  + /' || echo "  (nenhuma variavel nova)"
+else
+    echo "  (.env nao existe — copia .env.example)"
+fi
+
+echo
+echo "✓ Alpha atualizado: $OLD_HEAD → $NEW_HEAD"
+echo "  $(git log -1 --pretty=format:'%s' HEAD)"
