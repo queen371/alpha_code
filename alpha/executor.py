@@ -53,22 +53,40 @@ def build_assistant_tool_message(
     }
 
 
+_PREVIEW_FIELD_MAX = 1000
+
+
 def _format_result(result: dict, tool_name: str) -> str:
-    """Truncate and format a tool result for inclusion in messages."""
-    result_str = json.dumps(result, ensure_ascii=False)
-    if len(result_str) > TOOL_RESULT_MAX_CHARS:
-        result_str = json.dumps(
-            {
-                "truncated": True,
-                "partial": result_str[: TOOL_RESULT_MAX_CHARS - 100],
-                "message": (
-                    f"Result truncated from {len(result_str)} "
-                    f"to {TOOL_RESULT_MAX_CHARS} chars"
-                ),
-            },
-            ensure_ascii=False,
-        )
-    return result_str
+    """Truncate and format a tool result for inclusion in messages.
+
+    Hot path: a estimativa cheap (sum de len(str(v))) evita o `json.dumps`
+    completo da resposta inteira so para descobrir o tamanho. Se passar do
+    limite, cada campo de string e cortado por chars (limite por campo) — a
+    versao antiga fatiava no meio do JSON ja serializado, podendo cortar em
+    `\\uXXXX` ou em multi-byte UTF-8 e produzir saida com texto corrompido.
+    """
+    estimated = sum(len(str(v)) for v in result.values()) + 100
+    if estimated <= TOOL_RESULT_MAX_CHARS:
+        return json.dumps(result, ensure_ascii=False)
+
+    preview = {
+        k: (v[:_PREVIEW_FIELD_MAX] if isinstance(v, str) else v)
+        for k, v in result.items()
+    }
+    truncated = {
+        "truncated": True,
+        "tool": tool_name,
+        "preview": preview,
+        "message": (
+            f"Result truncated (estimated {estimated} chars > "
+            f"{TOOL_RESULT_MAX_CHARS}); strings clipped to "
+            f"{_PREVIEW_FIELD_MAX} per field."
+        ),
+    }
+    out = json.dumps(truncated, ensure_ascii=False)
+    if len(out) > TOOL_RESULT_MAX_CHARS:
+        out = out[:TOOL_RESULT_MAX_CHARS]
+    return out
 
 
 def _record_skip(tc: dict, tool_name: str, result: dict, messages: list[dict]) -> dict:
