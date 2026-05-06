@@ -278,7 +278,12 @@ async def _execute_shell(command: str, cwd: str = None, timeout: int | None = No
 register_tool(
     ToolDefinition(
         name="execute_shell",
-        description="Executar um comando no sistema. Operadores shell (|, >, &&, ||) não são suportados — use execute_python com subprocess para pipelines complexos. Retorna stdout, stderr e exit code.",
+        description=(
+            "Executar um comando no sistema. Pipes (|) SÃO suportados quando "
+            "todos os comandos do pipeline estão na lista safe; "
+            "outros operadores (&&, ||, ;, >, <, $()) NÃO são suportados — "
+            "use execute_pipeline para isso. Retorna stdout, stderr e exit code."
+        ),
         parameters={
             "type": "object",
             "properties": {
@@ -289,7 +294,7 @@ register_tool(
                 },
                 "timeout": {
                     "type": "integer",
-                    "description": "Timeout em segundos (máx 120). Padrão: 30",
+                    "description": "Timeout em segundos (máx 300). Padrão: 30",
                     "default": 30,
                 },
             },

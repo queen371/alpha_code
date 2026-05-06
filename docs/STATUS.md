@@ -83,6 +83,14 @@ Nenhuma issue ALTO pendente do AUDIT_V1.1. (DEEPs ainda tem MEDIO/BAIXO em fila.
 | #D021-PERF | DB connection per call | 2026-05-06 | `_get_pg_pool` lazy pool por connection string |
 | #D023-PERF | `_recent_results` json.dumps inteiro | 2026-05-06 | `_result_preview` campo-a-campo para 500 chars sem serializar tudo |
 | #D024-PERF | `_search_and_replace` N reads/writes | 2026-05-06 | Single read + replace + write por arquivo |
+| #DM002 | `file_tools.py` >500L | 2026-05-06 | Extraido `path_helpers.py`; 598L → 417L |
+| #DM006 | Deps ocultas | 2026-05-06 | `[network]/[database]/[web]/[all]` em pyproject.toml |
+| #DM008 | Registry copy-paste | 2026-05-06 | `FileBackedRegistry[T]` generico em `alpha/_registry.py` |
+| #DM009 | Categorias hardcoded | 2026-05-06 | `ToolCategory(str, Enum)` em tools/__init__.py |
+| #DM010 | execute_shell description errada | 2026-05-06 | Reflete pipes suportados + timeout 300s |
+| #DM011 | `_LOW_TEMP_PROVIDERS` hardcoded | 2026-05-06 | Flag `low_temperature` por provider em config |
+| #DM013 | display category icons mismatch | 2026-05-06 | Sincronizado com categorias reais (13/14 OK) |
+| ~~#DM001~~ | main.py >500L | **DEFERIDO** | Refator de REPL+state requer extraction nao-trivial |
 
 ---
 

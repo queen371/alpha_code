@@ -74,9 +74,13 @@ _SAFETY_ICONS = {
     "unknown": "?",
 }
 
-# Category icons for /tools display
+# Category icons for /tools display.
+# Chaves baterem com `td.category` em register_tool. Antes tinha `file`
+# (tool usa `filesystem`), `pipeline` (nenhuma tool), e faltava
+# `composite/browser/scraping/skills` — metade das categorias caia no
+# fallback `◆`. (#DM013)
 _CATEGORY_ICONS = {
-    "file": "📁",
+    "filesystem": "📁",
     "shell": "🖥",
     "code": "⟨⟩",
     "git": "⎇ ",
@@ -85,7 +89,10 @@ _CATEGORY_ICONS = {
     "database": "🗄",
     "system": "⚙ ",
     "agent": "🤖",
-    "pipeline": "⛓ ",
+    "browser": "🌍",
+    "scraping": "🕷",
+    "skills": "📚",
+    "composite": "⛓ ",
     "general": "◆ ",
 }
 

@@ -51,6 +51,7 @@ _PROVIDERS = {
         "api_key_env": None,
         "model_env": "OLLAMA_MODEL",
         "default_model": "qwen-heavy-abliterated:32b",
+        "low_temperature": True,
     },
     "gemma-12b": {
         "base_url": os.getenv("OLLAMA_API_BASE_URL", "http://localhost:11434/v1"),
@@ -58,6 +59,7 @@ _PROVIDERS = {
         "model_env": "OLLAMA_GEMMA_12B_MODEL",
         "default_model": "gemma3:12b",
         "supports_tools": False,
+        "low_temperature": True,
     },
     "gemma-27b": {
         "base_url": os.getenv("OLLAMA_API_BASE_URL", "http://localhost:11434/v1"),
@@ -65,6 +67,7 @@ _PROVIDERS = {
         "model_env": "OLLAMA_GEMMA_27B_MODEL",
         "default_model": "gemma3:27b",
         "supports_tools": False,
+        "low_temperature": True,
     },
 }
 

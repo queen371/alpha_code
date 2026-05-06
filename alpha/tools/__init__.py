@@ -25,6 +25,31 @@ class ToolSafety(str, Enum):
     DESTRUCTIVE = "destructive"
 
 
+class ToolCategory(str, Enum):
+    """Categorias canonicas de tools (#DM009).
+
+    Ate agora cada `register_tool(category="...")` passava string literal
+    espalhada em ~14 arquivos. Mismatches silenciosos eram comuns (ex:
+    `filesystem` vs `file` em display.py — vide #DM013/#100). Subclasse
+    `str` permite usar tanto `ToolCategory.FILESYSTEM` quanto a string
+    literal `"filesystem"` em ToolDefinition durante a migracao.
+    """
+    FILESYSTEM = "filesystem"
+    SHELL = "shell"
+    CODE = "code"
+    GIT = "git"
+    NETWORK = "network"
+    SEARCH = "search"
+    DATABASE = "database"
+    SYSTEM = "system"
+    AGENT = "agent"
+    BROWSER = "browser"
+    SCRAPING = "scraping"
+    SKILLS = "skills"
+    COMPOSITE = "composite"
+    GENERAL = "general"
+
+
 @dataclass
 class ToolDefinition:
     name: str
@@ -32,6 +57,8 @@ class ToolDefinition:
     parameters: dict
     safety: ToolSafety
     executor: Callable[..., Awaitable[dict[str, Any]]]
+    # Aceita ToolCategory ou str literal (subclasse de str). Tools antigas
+    # podem migrar gradualmente para o enum sem breaking change.
     category: str = "general"
     modes: list[str] = field(default_factory=list)  # empty = all modes
     enabled: bool = True

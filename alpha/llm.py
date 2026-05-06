@@ -28,9 +28,9 @@ BACKOFF_MULTIPLIER = 2.0
 RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 
 # Smaller local models (Ollama-backed) hallucinate tool calls less often at
-# lower temperatures. Cloud models (DeepSeek, OpenAI, Grok) are robust enough
-# to keep the higher creative default.
-_LOW_TEMP_PROVIDERS = frozenset({"ollama", "gemma-12b", "gemma-27b"})
+# lower temperatures. Politica vive como flag `low_temperature` em
+# config._PROVIDERS — adicionar provider novo so requer setar a flag,
+# sem editar este arquivo (#DM011).
 _LOW_TEMPERATURE = 0.2
 
 
@@ -137,7 +137,7 @@ async def stream_chat_with_tools(
     supports_tools = cfg["supports_tools"]
     api_format = cfg.get("api_format", "openai")
 
-    if provider in _LOW_TEMP_PROVIDERS and temperature > _LOW_TEMPERATURE:
+    if cfg.get("low_temperature") and temperature > _LOW_TEMPERATURE:
         temperature = _LOW_TEMPERATURE
 
     if api_format == "anthropic":
