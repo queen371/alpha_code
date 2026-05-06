@@ -7,6 +7,7 @@ Includes intelligent context compression, token tracking, and smart loop detecti
 
 import json
 import logging
+from collections import Counter
 from collections.abc import AsyncGenerator
 from difflib import SequenceMatcher
 
@@ -136,15 +137,25 @@ def _detect_loop(
     3. A→B→A→B cycles
     4. Stale progress (results not changing)
     """
-    # 1. Exact repetition
+    # 1. Exact repetition — Counter em vez de N x list.count() (O(N) vs O(N*M))
+    counts = Counter(recent_calls)
     for sig in call_sigs:
-        count = recent_calls.count(sig)
-        if count >= _MAX_REPEAT_CALLS:
-            return f"exact repeat: '{sig[:60]}' called {count}x"
+        c = counts.get(sig, 0)
+        if c >= _MAX_REPEAT_CALLS:
+            return f"exact repeat: '{sig[:60]}' called {c}x"
 
-    # 2. Similar calls (same tool with slightly different args)
+    # 2. Similar calls (same tool with slightly different args) — indexa por
+    # tool name primeiro para evitar SequenceMatcher quando os nomes diferem.
+    # Em sessoes ativas com ~60 recent_calls e 5+ tools diferentes, isso
+    # corta ~80% das comparacoes caras.
+    by_name: dict[str, list[str]] = {}
+    for s in recent_calls:
+        by_name.setdefault(s.partition(":")[0], []).append(s)
     for sig in call_sigs:
-        similar_count = sum(1 for s in recent_calls if _are_similar(sig, s))
+        candidates = by_name.get(sig.partition(":")[0])
+        if not candidates or len(candidates) < _SIMILAR_REPEAT_CALLS:
+            continue
+        similar_count = sum(1 for s in candidates if _are_similar(sig, s))
         if similar_count >= _SIMILAR_REPEAT_CALLS:
             return f"similar calls: '{sig[:60]}' ~{similar_count}x"
 

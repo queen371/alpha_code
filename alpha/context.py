@@ -49,6 +49,12 @@ PROTECTED_TAIL_MESSAGES = 8
 # Minimum messages before compression is even considered
 MIN_MESSAGES_FOR_COMPRESSION = 12
 
+# Cap absoluto de messages em memoria/payload — independente da estimativa
+# de tokens. Tool results pequenos (< 200 chars) podem nao gatilhar o
+# threshold por tokens mesmo com milhares de messages, mas cada iteracao
+# reserializa toda a lista para JSON e o `_detect_loop` itera N entradas.
+MAX_MESSAGES = 500
+
 
 def estimate_tokens(text: str) -> int:
     """Estimate token count from text length."""
@@ -141,6 +147,10 @@ def needs_compression(messages: list[dict], provider: str) -> bool:
     """Check if messages exceed the compression threshold."""
     if len(messages) < MIN_MESSAGES_FOR_COMPRESSION:
         return False
+    # Hard cap por contagem: muitas messages pequenas nao disparam o cap
+    # por tokens mas degradam payload SSE e loop detection.
+    if len(messages) > MAX_MESSAGES:
+        return True
     limit = get_context_limit(provider)
     current = estimate_messages_tokens(messages)
     return current > (limit * COMPRESSION_THRESHOLD)

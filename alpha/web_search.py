@@ -88,15 +88,40 @@ _REQ_HEADERS = {
 
 # Reusable httpx client (avoids TCP+TLS handshake per URL)
 _shared_client: httpx.AsyncClient | None = None
+_client_loop: object | None = None
 
 
 async def _get_shared_client() -> httpx.AsyncClient:
-    global _shared_client
-    if _shared_client is None or _shared_client.is_closed:
+    """Get or create the shared httpx client.
+
+    httpx.AsyncClient amarra o transport ao loop em que foi criado. Quando
+    o CLI roda em modo single-shot, cada `python main.py "task"` cria um
+    loop novo via `asyncio.run()` mas o modulo persiste se a CLI for
+    re-importada (testes, daemon mode). Detectar `is_closed` nao basta —
+    o client pode estar `not closed` mas amarrado a um loop morto, gerando
+    `RuntimeError: Event loop is closed` na proxima request.
+    """
+    global _shared_client, _client_loop
+    import asyncio
+
+    loop = asyncio.get_running_loop()
+    if (
+        _shared_client is None
+        or _shared_client.is_closed
+        or _client_loop is not loop
+    ):
+        # Loop diferente: tenta fechar o client antigo se ainda esta vivo.
+        # Aclose no loop errado pode falhar — engolimos.
+        if _shared_client is not None and not _shared_client.is_closed:
+            try:
+                await _shared_client.aclose()
+            except Exception:
+                pass
         _shared_client = httpx.AsyncClient(
             follow_redirects=False,
             timeout=_TIMEOUT,
         )
+        _client_loop = loop
     return _shared_client
 
 

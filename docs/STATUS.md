@@ -52,6 +52,9 @@ Nenhuma issue ALTO pendente do AUDIT_V1.1. (DEEPs ainda tem MEDIO/BAIXO em fila.
 | #DL013 | Executor sem validacao de args | 2026-05-06 | `_parse_and_validate_args` retorna error estruturado; extras filtrados |
 | #DL014 | `delegate_parallel` sem cap total | 2026-05-06 | `max_delegate_total_tasks=10` rejeita listas grandes antes de criar scratch dirs |
 | #DL019 | `save_session` corrupta tool_calls | 2026-05-06 | `_sanitize_for_save` remove orfas antes de persistir |
+| #D013-PERF | Loop detection O(N²) com SequenceMatcher | 2026-05-06 | Counter para exact + indexa por tool name; short-circuit em <threshold candidates |
+| #D015-PERF | `_get_shared_client` sem detect de loop morto | 2026-05-06 | Track `_client_loop`; recria quando `get_running_loop()` difere |
+| #D016-PERF | Lista messages sem hard cap | 2026-05-06 | `MAX_MESSAGES=500` em `needs_compression` (independente de tokens) |
 
 ---
 
@@ -109,7 +112,7 @@ Nenhuma issue ALTO pendente do AUDIT_V1.1. (DEEPs ainda tem MEDIO/BAIXO em fila.
 | Issues criticas pendentes | **0** |
 | Issues ALTO pendentes (V1.1) | 0 |
 | Issues no V1.1 (geral) | 117 (5 verificadas resolvidas) |
-| Suite de testes | 215/215 verde |
+| Suite de testes | 223/223 verde |
 | CI gate | Ativo (Py 3.11 + 3.12) |
 | MVP bloqueadores | Nao avaliado (sem MVP_PLAN) |
 
