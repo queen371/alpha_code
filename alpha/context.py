@@ -100,6 +100,13 @@ def get_context_limit(provider: str) -> int:
             # 1M context — leave ~100K headroom for response + tool schemas.
             return 900_000
 
+    if provider == "deepseek":
+        # DeepSeek V4 (Pro/Flash) ships with 1M context; legacy v3 chat/coder
+        # remain at 64K and fall through to PROVIDER_CONTEXT_LIMITS below.
+        model = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-pro").lower()
+        if "v4" in model or "v5" in model:
+            return 900_000
+
     return PROVIDER_CONTEXT_LIMITS.get(provider, 28_000)
 
 

@@ -25,7 +25,7 @@ _PROVIDERS = {
         "base_url": os.getenv("DEEPSEEK_API_BASE_URL", "https://api.deepseek.com"),
         "api_key_env": "DEEPSEEK_API_KEY",
         "model_env": "DEEPSEEK_MODEL",
-        "default_model": "deepseek-chat",
+        "default_model": "deepseek-v4-pro",
     },
     "openai": {
         "base_url": os.getenv("OPENAI_API_BASE_URL", "https://api.openai.com/v1"),
