@@ -243,9 +243,16 @@ async def _notify_user(
 register_tool(
     ToolDefinition(
         name="clipboard_read",
-        description="Ler o conteúdo atual do clipboard do sistema.",
+        description=(
+            "Ler o conteúdo atual do clipboard do sistema. "
+            "Pede aprovação porque clipboards costumam guardar senhas, "
+            "tokens e outros valores sensíveis copiados pelo usuário."
+        ),
         parameters={"type": "object", "properties": {}},
-        safety=ToolSafety.SAFE,
+        # DESTRUCTIVE: clipboard pode conter credenciais transitorias.
+        # Combinado com http_request/web_search auto-aprovados, leitura
+        # silenciosa permite exfil. Promovido em DEEP_SECURITY #D103.
+        safety=ToolSafety.DESTRUCTIVE,
         category="system",
         executor=_clipboard_read,
     )

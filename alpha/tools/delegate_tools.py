@@ -40,7 +40,7 @@ _SCRATCH_SUBDIR = Path(".alpha") / "runs"
 # - git_operation: gating dinamico via _auto_approve_no_callback abaixo
 SUBAGENT_DESTRUCTIVE_BLOCKLIST = frozenset({
     "execute_shell", "execute_pipeline", "http_request",
-    "query_database", "clipboard_write", "install_package",
+    "query_database", "clipboard_read", "clipboard_write", "install_package",
     "browser_click", "browser_fill", "browser_select_option",
     "browser_press_key", "browser_execute_js",
 })
