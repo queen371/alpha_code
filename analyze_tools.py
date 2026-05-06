@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
+import os
 import re
 import glob
 
 def analyze_tools():
-    tools_dir = "/home/user/Documents/MeusProjetos/Alpha_Code/alpha/tools"
+    tools_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alpha", "tools")
     
     # Padrões regex
     register_pattern = r'register_tool\('

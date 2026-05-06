@@ -5,7 +5,7 @@ model:
   provider: deepseek
   id: deepseek-chat
 
-workspace: /home/user/Documents/MeusProjetos/Alpha_Code
+workspace: .
 
 # Uncomment and edit to restrict tools/skills:
 # tools:
