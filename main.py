@@ -397,8 +397,18 @@ def run_repl(provider: str, temperature: float):
                         messages.extend(loaded)
                         history.clear()
                         history.extend(m for m in loaded if m["role"] in ("user", "assistant"))
-                        session_id = parts[1]
-                        print(f"  {c(C.GREEN, f'Loaded {len(loaded)} messages from {parts[1]}')}")
+                        # Por default gera novo session_id em vez de reusar
+                        # `parts[1]` — antes, edicoes apos `/load` sobrescreviam
+                        # silenciosamente a sessao original (#DL018).
+                        # `--inplace` mantem o id antigo para quem quer
+                        # explicitamente continuar a mesma sessao.
+                        if len(parts) >= 3 and parts[2] == "--inplace":
+                            session_id = parts[1]
+                            print(f"  {c(C.GREEN, f'Loaded {len(loaded)} messages from {parts[1]} (in-place: saves overwrite)')}")
+                        else:
+                            session_id = generate_session_id()
+                            print(f"  {c(C.GREEN, f'Loaded {len(loaded)} messages from {parts[1]} into new session {session_id}')}")
+                            print(f"  {c(C.GRAY, '  (use /load <id> --inplace to overwrite the original instead)')}")
                 continue
             elif cmd == "/continue":
                 # Resume from last session using its summary as context

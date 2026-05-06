@@ -72,6 +72,10 @@ Nenhuma issue ALTO pendente do AUDIT_V1.1. (DEEPs ainda tem MEDIO/BAIXO em fila.
 | #D104-SEC | screenshot dir compartilhado | 2026-05-06 | Co-fixed por #D020-BUGS (per-user dir 0o700 + token_hex) |
 | #D105-SEC | `browser_screenshot` path absoluto | 2026-05-06 | Validacao de workspace mesmo em paths absolutos |
 | #D106-SEC | web_search DNS rebinding | 2026-05-06 | IP pinning via `_resolve_and_validate` + `extensions={sni_hostname}` |
+| #DL015 | Workspace validation duplicada | 2026-05-06 | Helper `assert_within_workspace` centraliza a regra |
+| #DL017 | Error structure inconsistente | 2026-05-06 | `_annotate_error` adiciona `{ok:false, category}` em todos os caminhos |
+| #DL018 | `/load` sobrescreve sessao original | 2026-05-06 | `/load` gera novo id por default; `--inplace` preserva comportamento antigo |
+| #DL020 | Loop detection 2a system message | 2026-05-06 | role=user (com prefix `[ALPHA SYSTEM NOTE]`) em vez de role=system tardia |
 
 ---
 
@@ -129,7 +133,7 @@ Nenhuma issue ALTO pendente do AUDIT_V1.1. (DEEPs ainda tem MEDIO/BAIXO em fila.
 | Issues criticas pendentes | **0** |
 | Issues ALTO pendentes (V1.1) | 0 |
 | Issues no V1.1 (geral) | 117 (5 verificadas resolvidas) |
-| Suite de testes | 232/232 verde |
+| Suite de testes | 241/241 verde |
 | CI gate | Ativo (Py 3.11 + 3.12) |
 | MVP bloqueadores | Nao avaliado (sem MVP_PLAN) |
 

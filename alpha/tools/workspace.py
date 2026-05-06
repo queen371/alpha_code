@@ -28,3 +28,21 @@ else:
     AGENT_WORKSPACE = _raw_workspace
 
 AGENT_WORKSPACE.mkdir(parents=True, exist_ok=True)
+
+
+def assert_within_workspace(path: Path | str) -> str | None:
+    """Validate that `path` is inside AGENT_WORKSPACE.
+
+    Centraliza o check `path.relative_to(AGENT_WORKSPACE)` que estava
+    duplicado em ~10 sites de tools (#DL015 DEEP_LOGIC). Single source
+    para a Camada B do enforcement de workspace; reduz risco de drift
+    quando o check muda em uma tool e nao em outras.
+
+    Returns None se OK, ou mensagem de erro se path estiver fora.
+    """
+    p = Path(path).resolve()
+    try:
+        p.relative_to(AGENT_WORKSPACE)
+        return None
+    except ValueError:
+        return f"Path fora do workspace permitido ({AGENT_WORKSPACE}): {p}"

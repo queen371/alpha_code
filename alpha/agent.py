@@ -315,11 +315,16 @@ async def run_agent(
                 f"Loop detected ({loop_reason}) at iteration {iteration + 1} "
                 f"— forcing final response"
             )
+            # Usar role=user em vez de system: providers como OpenAI strict
+            # mode e alguns Ollama models rejeitam/ignoram system message
+            # tardia, alem de competir com a system message original em
+            # messages[0]. Como mensagem do "user", a instrucao e tratada
+            # como prompt regular pelo modelo. (#DL020)
             messages.append(
                 {
-                    "role": "system",
+                    "role": "user",
                     "content": (
-                        f"ATTENTION: Loop detected ({loop_reason}). "
+                        f"[ALPHA SYSTEM NOTE] Loop detected ({loop_reason}). "
                         "STOP calling tools and produce your final response now "
                         "based on the data already collected. Synthesize ALL information from "
                         "previous calls into a complete response."

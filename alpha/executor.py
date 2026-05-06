@@ -89,14 +89,31 @@ def _format_result(result: dict, tool_name: str) -> str:
     return out
 
 
+def _annotate_error(result: dict, category: str) -> dict:
+    """Adicionar invariante `{ok: false, category}` em resultados de erro.
+
+    DEEP_LOGIC #DL017: errors apareciam em N formatos diferentes
+    (`{"error": ...}`, `{"skipped": True, ...}`, `{"workspace_violation": True, ...}`),
+    forcando o modelo a aprender variantes pra detectar falha. Mantemos os
+    campos legados pra retrocompatibilidade mas garantimos que toda falha
+    tem `ok=false` + `category` em uma das categorias conhecidas:
+    `denied`, `timeout`, `violation`, `runtime`, `parse_error`, `unknown_tool`.
+    """
+    out = dict(result)
+    out.setdefault("ok", False)
+    out.setdefault("category", category)
+    return out
+
+
 def _record_skip(tc: dict, tool_name: str, result: dict, messages: list[dict]) -> dict:
     """Append a denied/skipped result to messages and return the event dict."""
+    annotated = _annotate_error(result, "denied")
     messages.append({
         "role": "tool",
         "tool_call_id": tc["id"],
-        "content": json.dumps(result, ensure_ascii=False),
+        "content": json.dumps(annotated, ensure_ascii=False),
     })
-    return {"type": "tool_result", "name": tool_name, "result": result, "denied": True}
+    return {"type": "tool_result", "name": tool_name, "result": annotated, "denied": True}
 
 
 def _record_result(tc: dict, tool_name: str, result: dict, messages: list[dict]) -> None:
@@ -119,10 +136,14 @@ async def _execute_single_tool(tool_def, tool_name: str, args: dict) -> dict:
         )
     except TimeoutError:
         logger.error(f"Tool timeout ({tool_name}): {tool_timeout}s")
-        result = {"error": f"Execution timed out ({tool_timeout}s)"}
+        result = _annotate_error(
+            {"error": f"Execution timed out ({tool_timeout}s)"}, "timeout"
+        )
     except Exception as e:
         logger.error(f"Tool error ({tool_name}): {type(e).__name__}: {e}")
-        result = {"error": f"{type(e).__name__}: {e}"}
+        result = _annotate_error(
+            {"error": f"{type(e).__name__}: {e}"}, "runtime"
+        )
     return result
 
 
@@ -257,7 +278,9 @@ async def execute_tool_calls(
         tool_def = get_tool_fn(tool_name) if get_tool_fn else None
 
         if tool_def is None:
-            result = {"error": f"Unknown tool: {tool_name}"}
+            result = _annotate_error(
+                {"error": f"Unknown tool: {tool_name}"}, "unknown_tool"
+            )
             yield {"type": "tool_call", "name": tool_name, "args": {}, "safety": "unknown"}
             yield {"type": "tool_result", "name": tool_name, "result": result}
             messages.append({
@@ -269,6 +292,7 @@ async def execute_tool_calls(
 
         args, parse_error = _parse_and_validate_args(tc, tool_def)
         if parse_error is not None:
+            parse_error = _annotate_error(parse_error, "parse_error")
             yield {"type": "tool_call", "name": tool_name, "args": {}, "safety": "denied"}
             yield {"type": "tool_result", "name": tool_name, "result": parse_error}
             messages.append({
@@ -280,7 +304,9 @@ async def execute_tool_calls(
 
         ok, args, err = _enforce_workspace(workspace, tool_name, args)
         if not ok:
-            result = {"error": err, "workspace_violation": True}
+            result = _annotate_error(
+                {"error": err, "workspace_violation": True}, "violation"
+            )
             yield {"type": "tool_call", "name": tool_name, "args": args, "safety": "denied"}
             yield {"type": "tool_result", "name": tool_name, "result": result}
             messages.append({
@@ -384,7 +410,9 @@ async def _execute_sequential(
         tool_def = get_tool_fn(tool_name) if get_tool_fn else None
 
         if tool_def is None:
-            result = {"error": f"Unknown tool: {tool_name}"}
+            result = _annotate_error(
+                {"error": f"Unknown tool: {tool_name}"}, "unknown_tool"
+            )
             yield {"type": "tool_call", "name": tool_name, "args": {}, "safety": "unknown"}
             yield {"type": "tool_result", "name": tool_name, "result": result}
             messages.append({
@@ -396,6 +424,7 @@ async def _execute_sequential(
 
         args, parse_error = _parse_and_validate_args(tc, tool_def)
         if parse_error is not None:
+            parse_error = _annotate_error(parse_error, "parse_error")
             yield {"type": "tool_call", "name": tool_name, "args": {}, "safety": "denied"}
             yield {"type": "tool_result", "name": tool_name, "result": parse_error}
             messages.append({
@@ -407,7 +436,9 @@ async def _execute_sequential(
 
         ok, args, err = _enforce_workspace(workspace, tool_name, args)
         if not ok:
-            result = {"error": err, "workspace_violation": True}
+            result = _annotate_error(
+                {"error": err, "workspace_violation": True}, "violation"
+            )
             yield {"type": "tool_call", "name": tool_name, "args": args, "safety": "denied"}
             yield {"type": "tool_result", "name": tool_name, "result": result}
             messages.append({
