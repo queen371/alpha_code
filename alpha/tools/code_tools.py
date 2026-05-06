@@ -72,6 +72,23 @@ _BLOCKED_IMPORT_PATTERNS = [
     r"\bfrom\s+ddgs\b",
     r"\bimport\s+dotenv\b",
     r"\bfrom\s+dotenv\b",
+    # Deserialization / runtime introspection — pickle.loads e marshal.loads
+    # executam __reduce__ arbitrario; runpy/inspect/gc/platform/dis dao escapes
+    # via globals, frames ou execucao de modulos externos.
+    r"\bimport\s+pickle\b",
+    r"\bfrom\s+pickle\b",
+    r"\bimport\s+marshal\b",
+    r"\bfrom\s+marshal\b",
+    r"\bimport\s+runpy\b",
+    r"\bfrom\s+runpy\b",
+    r"\bimport\s+inspect\b",
+    r"\bfrom\s+inspect\b",
+    r"\bimport\s+gc\b",
+    r"\bfrom\s+gc\b",
+    r"\bimport\s+platform\b",
+    r"\bfrom\s+platform\b",
+    r"\bimport\s+dis\b",
+    r"\bfrom\s+dis\b",
     r"\b__import__\s*\(",
     r"\beval\s*\(",
     r"\bexec\s*\(",

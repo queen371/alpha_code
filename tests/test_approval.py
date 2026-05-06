@@ -91,3 +91,31 @@ class TestShellSafety:
     def test_shell_execute_approval(self):
         assert needs_approval("execute_shell", {"command": "ls -la"}) is False
         assert needs_approval("execute_shell", {"command": "rm -rf /"}) is True
+
+
+class TestInterpreterEvalFlags:
+    """DEEP_SECURITY #D102: python -c / node -e bypass do sandbox de codigo."""
+
+    def test_python_dash_c_requires_approval(self):
+        assert is_safe_shell_command("python -c 'print(1)'") is False
+        assert is_safe_shell_command("python3 -c \"open('/etc/passwd').read()\"") is False
+
+    def test_python_normal_args_allowed(self):
+        # python script.py / python -m mod / python --version seguem auto.
+        assert is_safe_shell_command("python script.py") is True
+        assert is_safe_shell_command("python -m pytest") is True
+        assert is_safe_shell_command("python --version") is True
+
+    def test_node_eval_flags_blocked(self):
+        assert is_safe_shell_command("node -e 'console.log(1)'") is False
+        assert is_safe_shell_command("node --eval '1+1'") is False
+        assert is_safe_shell_command("node -p 'process.env'") is False
+
+    def test_perl_ruby_eval_blocked(self):
+        assert is_safe_shell_command("perl -e 'print 1'") is False
+        assert is_safe_shell_command("ruby -e 'puts 1'") is False
+
+    def test_bash_dash_c_blocked(self):
+        # bash/sh -c sao caminho classico de quebrar sandbox.
+        assert is_safe_shell_command("bash -c 'id'") is False
+        assert is_safe_shell_command("sh -c 'whoami'") is False

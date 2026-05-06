@@ -121,6 +121,21 @@ _SAFE_EXEC_COMMANDS = frozenset({
     "dirname", "md5sum", "sha256sum", "sort", "uniq", "du",
 })
 
+# Interpretadores que aceitam codigo inline via flag — usar essas flags
+# bypassa o sandbox do execute_python. `python -c "..."` e `node -e "..."`
+# auto-aprovados eram um vetor de RCE silenciosa.
+_INTERPRETER_EVAL_FLAGS = {
+    "python":  frozenset({"-c"}),
+    "python3": frozenset({"-c"}),
+    "node":    frozenset({"-e", "--eval", "-p", "--print"}),
+    "perl":    frozenset({"-e", "-E"}),
+    "ruby":    frozenset({"-e"}),
+    "bash":    frozenset({"-c"}),
+    "sh":      frozenset({"-c"}),
+    "zsh":     frozenset({"-c"}),
+    "deno":    frozenset({"eval"}),
+}
+
 # Git actions considered read-only (safe for auto-approval)
 _SAFE_GIT_ACTIONS = frozenset(
     {
@@ -183,6 +198,14 @@ def _is_single_command_safe(cmd_str: str) -> bool:
             for arg in parts[1:]:
                 if pattern.search(arg):
                     return False
+
+        # Interpretador com flag de eval inline (python -c, node -e, etc.):
+        # exigir aprovacao humana — caso contrario o sandbox de execute_python
+        # e dribavel via execute_shell.
+        if base_cmd in _INTERPRETER_EVAL_FLAGS:
+            eval_flags = _INTERPRETER_EVAL_FLAGS[base_cmd]
+            if any(arg in eval_flags for arg in parts[1:]):
+                return False
 
         # Special handling: find -exec with safe commands is OK
         if base_cmd == "find" and "-exec" in parts:

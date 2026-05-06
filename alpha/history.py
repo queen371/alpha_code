@@ -19,9 +19,39 @@ _MAX_SESSIONS = 50  # keep last N sessions on disk
 
 
 def _ensure_dir() -> Path:
-    """Create history directory if needed."""
+    """Create history directory if needed.
+
+    Perms 0o700: session files contem tool results (read_file de .env,
+    output de execute_shell, query_database rows) e [CWD] do user. Em
+    hosts compartilhados, deixar group/other-readable e leak.
+    """
     _HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(_HISTORY_DIR, 0o700)
+    except OSError:
+        pass
     return _HISTORY_DIR
+
+
+def _atomic_write(path: Path, data: str) -> None:
+    """Write file with mode 0o600 from creation, no follow-symlink.
+
+    Substitui `path.write_text(...)` que herda umask (default 0o644),
+    expondo o conteudo entre usuarios em hosts compartilhados.
+    """
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(str(path), flags, 0o600)
+    try:
+        os.write(fd, data.encode("utf-8"))
+    finally:
+        os.close(fd)
+    # Idempotente caso o arquivo ja existisse com perms erradas.
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
 
 
 def _session_path(session_id: str) -> Path:
@@ -116,7 +146,7 @@ def save_session(
         data["metadata"] = metadata
 
     path = _session_path(session_id)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write(path, json.dumps(data, ensure_ascii=False, indent=2))
     logger.info(f"Session saved: {path}")
 
     _cleanup_old_sessions()

@@ -44,6 +44,10 @@ Nenhuma issue ALTO pendente do AUDIT_V1.1. (DEEPs ainda tem MEDIO/BAIXO em fila.
 | #062 | `compress_context` sem fallback de truncacao | 2026-05-06 | Fail-counter (>=2 empty/exception) cai em `_hard_truncate` que poda tool orfas; 7 testes adicionados |
 | #019 | Prompt injection via parent tool results | 2026-05-06 | Vetor eliminado por remocao do caminho (co-fix com #118 — `_extract_relevant_context` deletada) |
 | #118 | `_extract_relevant_context` e codigo morto | 2026-05-06 | Funcao + parametro `parent_messages` deletados; sub-agents recebem so task + context explicito |
+| #D101 | RCE via pickle/marshal em execute_python | 2026-05-06 | Adicionado pickle/marshal/runpy/inspect/gc/platform/dis ao blocklist regex; 14 testes |
+| #D102 | execute_shell auto-aprova `python -c`/`node -e` | 2026-05-06 | Novo `_INTERPRETER_EVAL_FLAGS` em approval.py rejeita interpretadores com flags de eval inline |
+| #D108 | pip 24.0 com CVEs adicionais (incl. RCE) | 2026-05-06 | pip 24.0 -> 26.1.1; `pip-audit` confirma 3 CVEs fechadas |
+| #D109 | History files com perms 0o644 (leak inter-usuario) | 2026-05-06 | `_atomic_write` 0o600 + dir 0o700 + O_NOFOLLOW; 5 testes |
 
 ---
 
@@ -101,7 +105,7 @@ Nenhuma issue ALTO pendente do AUDIT_V1.1. (DEEPs ainda tem MEDIO/BAIXO em fila.
 | Issues criticas pendentes | **0** |
 | Issues ALTO pendentes (V1.1) | 0 |
 | Issues no V1.1 (geral) | 117 (5 verificadas resolvidas) |
-| Suite de testes | 168/168 verde |
+| Suite de testes | 201/201 verde |
 | CI gate | Ativo (Py 3.11 + 3.12) |
 | MVP bloqueadores | Nao avaliado (sem MVP_PLAN) |
 
