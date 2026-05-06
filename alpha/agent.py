@@ -13,9 +13,10 @@ from difflib import SequenceMatcher
 from .approval import is_denied, needs_approval
 from .config import MAX_ITERATIONS
 from .context import (
-    compress_context,
+    compress_until_under_budget,
     estimate_messages_tokens,
     get_context_limit,
+    is_context_overflow_error,
     needs_compression,
 )
 from .executor import build_assistant_tool_message, execute_tool_calls
@@ -209,38 +210,70 @@ async def run_agent(
     for iteration in range(iteration_limit):
         logger.info(f"Agent iteration {iteration + 1}/{iteration_limit}")
 
-        # ── Context compression (replaces crude truncation) ──
+        # ── Pre-call adaptive compression ──
         if needs_compression(messages, provider):
             tokens_before = estimate_messages_tokens(messages)
             try:
-                await compress_context(messages, provider, stream_chat_with_tools)
-                tokens_after = estimate_messages_tokens(messages)
-                logger.info(
-                    f"Context compressed: {tokens_before} -> {tokens_after} tokens"
+                _, tokens_after = await compress_until_under_budget(
+                    messages, provider, stream_chat_with_tools
                 )
-                yield {
-                    "type": "context_compressed",
-                    "before": tokens_before,
-                    "after": tokens_after,
-                }
+                if tokens_after != tokens_before:
+                    yield {
+                        "type": "context_compressed",
+                        "before": tokens_before,
+                        "after": tokens_after,
+                    }
             except Exception as e:
                 logger.warning(f"Context compression failed: {e} — continuing")
 
-        # Stream LLM call
+        # ── Stream LLM call (with one overflow retry) ──
         final_event = None
-        async for event in stream_chat_with_tools(
-            messages, tools, temperature, provider=provider
-        ):
-            if event["type"] == "content_token":
-                yield {"type": "token", "text": event["token"]}
-            elif event["type"] == "final":
-                final_event = event
+        overflow_retried = False
 
-        if final_event is None:
-            yield {"type": "error", "message": "No response from LLM"}
-            return
+        while True:
+            final_event = None
+            async for event in stream_chat_with_tools(
+                messages, tools, temperature, provider=provider
+            ):
+                if event["type"] == "content_token":
+                    yield {"type": "token", "text": event["token"]}
+                elif event["type"] == "final":
+                    final_event = event
 
-        # LLM error
+            if final_event is None:
+                yield {"type": "error", "message": "No response from LLM"}
+                return
+
+            err = final_event.get("error")
+            if err and is_context_overflow_error(err) and not overflow_retried:
+                overflow_retried = True
+                logger.warning(
+                    f"Context overflow from provider — re-compressing aggressively: {err}"
+                )
+                try:
+                    limit = get_context_limit(provider)
+                    tokens_before = estimate_messages_tokens(messages)
+                    _, tokens_after = await compress_until_under_budget(
+                        messages,
+                        provider,
+                        stream_chat_with_tools,
+                        target_tokens=int(limit * 0.4),
+                        max_passes=3,
+                    )
+                    yield {
+                        "type": "context_compressed",
+                        "before": tokens_before,
+                        "after": tokens_after,
+                    }
+                except Exception as ce:
+                    logger.error(f"Aggressive compression failed: {ce}")
+                    yield {"type": "error", "message": err}
+                    return
+                continue  # retry the LLM call once
+
+            break
+
+        # LLM error (non-overflow, or overflow that survived the retry)
         if final_event.get("error"):
             yield {"type": "error", "message": final_event["error"]}
             return

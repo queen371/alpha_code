@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Alpha Code
 
-A standalone terminal agent that connects to multiple LLM providers (DeepSeek, OpenAI, Anthropic/Claude, Grok, Ollama) and executes tasks autonomously using a tool-calling loop. Written in pure async Python with minimal dependencies (httpx, python-dotenv, ddgs, pyyaml).
+A standalone terminal agent that connects to multiple LLM providers (DeepSeek, OpenAI, Anthropic/Claude, Grok, Ollama) and executes tasks autonomously using a tool-calling loop. Written in pure async Python with minimal dependencies (httpx, python-dotenv, ddgs, pyyaml, prompt_toolkit).
 
 ## Running
 
@@ -52,6 +52,9 @@ The agent runs an async generator loop: **LLM call → tool detection → approv
 - **`alpha/hooks.py`** — Declarative hooks from `.alpha/settings.json`. Events: `pre_tool` (can veto with `blocking: true`), `post_tool` (informational), `on_user_prompt`, `on_stop`. Optional regex `matcher` per hook. Payload to commands via stdin (JSON) and env vars (`ALPHA_TOOL_NAME`, `ALPHA_TOOL_ARGS_JSON`, `ALPHA_USER_PROMPT`, `ALPHA_WORKSPACE`).
 - **`alpha/mcp/`** — Stdio MCP client. Spawns subprocesses, performs JSON-RPC handshake (`initialize` + `notifications/initialized`), discovers tools via `tools/list`, registers them as `mcp__<server>__<tool>` in `TOOL_REGISTRY` (all `DESTRUCTIVE` by default — gate via `allow` rules). Config in `.alpha/mcp.json` (`mcpServers` block, Claude-Code-compatible). Sync `subprocess.Popen` + reader thread because the CLI recreates an event loop per turn.
 - **`alpha/display.py`** — ANSI terminal UI. Approval prompts are in Portuguese ("Aprovar? [s/n]"). Special rendering for `present_plan` (yellow plan card) and `todo_write` (checklist).
+- **`alpha/repl_input.py`** — Rich line editor on top of `prompt_toolkit`. Returns `(text, image_paths)`. Ctrl+V (with Alt+V fallback) reads images from the system clipboard, saves them to `/tmp/alpha-clip-*.png`, and inserts a `[Image #N]` placeholder.
+- **`alpha/clipboard.py`** — Image clipboard reader for X11 (`xclip`) and Wayland (`wl-paste`). Probes available types before reading to avoid blocking.
+- **`alpha/attachments.py`** — Builds provider-neutral user content from text + image paths. Returns a plain string when no images are attached, or an OpenAI-shaped block list (`text` + `image_url`) otherwise. The Anthropic adapter translates that list to Anthropic's `image`/`source.base64` shape.
 
 ### Tool system
 

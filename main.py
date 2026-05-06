@@ -16,8 +16,10 @@ import logging
 import os
 import sys
 import textwrap
+from pathlib import Path
 
 from alpha.agents import AgentScope, get_agent, list_agents, load_all_agents
+from alpha.attachments import build_user_content
 from alpha.config import (
     DEFAULT_PROVIDER,
     get_available_providers,
@@ -25,6 +27,7 @@ from alpha.config import (
     load_system_prompt,
 )
 from alpha import hooks
+from alpha.repl_input import cleanup_temp_images, read_input
 from alpha.mcp import (
     list_active_servers as list_mcp_servers,
     load_mcp_servers,
@@ -170,6 +173,7 @@ def _fire_on_stop():
 atexit.register(_fire_on_stop)
 atexit.register(_shutdown_browser_session)
 atexit.register(_shutdown_mcp_servers)
+atexit.register(cleanup_temp_images)
 
 
 async def _run_once(messages, user_message, provider, temperature, get_tool_fn, tools, workspace=None):
@@ -282,7 +286,8 @@ def run_repl(provider: str, temperature: float):
     while True:
         try:
             prompt = f"{c(C.GREEN + C.BOLD, '❯')} "
-            user_input = input(prompt).strip()
+            user_input, image_paths = read_input(prompt)
+            user_input = user_input.strip()
         except (KeyboardInterrupt, EOFError):
             # Auto-save on exit
             if len(messages) > 1:
@@ -291,7 +296,7 @@ def run_repl(provider: str, temperature: float):
             print(f"{c(C.GRAY, 'Goodbye.')}")
             break
 
-        if not user_input:
+        if not user_input and not image_paths:
             continue
 
         # One-shot agent dispatch: "@name message"
@@ -441,6 +446,43 @@ def run_repl(provider: str, temperature: float):
             elif cmd == "/tools":
                 print_tools_list(tools)
                 continue
+            elif cmd == "/image":
+                if len(parts) < 2:
+                    print(f"  {c(C.GRAY, 'Usage: /image <path> [optional message]')}")
+                    print(f"  {c(C.GRAY, 'Example: /image /tmp/screenshot.png what is wrong?')}")
+                    continue
+                img_path_str = parts[1]
+                img_path = Path(os.path.expanduser(img_path_str))
+                if not img_path.is_file():
+                    print_error(f"Image not found: {img_path}")
+                    continue
+                # The text after the path becomes the user message; default if absent.
+                rest = user_input.split(maxsplit=2)
+                msg_text = rest[2] if len(rest) >= 3 else "What's in this image?"
+                cwd = os.getcwd()
+                user_content = build_user_content(
+                    f"[CWD: {cwd}]\n{msg_text}", [img_path]
+                )
+                print(c(C.GRAY, f"  (1 image attached: {img_path.name})"))
+                messages.append({"role": "user", "content": user_content})
+                history.append({"role": "user", "content": f"[image: {img_path.name}] {msg_text}"})
+                print()
+                try:
+                    reply = asyncio.run(
+                        _run_once(
+                            messages, msg_text, provider, temperature,
+                            get_tool_fn, tools,
+                            workspace=active_agent.workspace if active_agent else None,
+                        )
+                    )
+                except KeyboardInterrupt:
+                    print(c(C.YELLOW, "\n\nInterrupted."))
+                    reply = ""
+                print()
+                if reply:
+                    messages.append({"role": "assistant", "content": reply})
+                    history.append({"role": "assistant", "content": reply})
+                continue
             elif cmd == "/mcp":
                 servers = list_mcp_servers()
                 if not servers:
@@ -561,6 +603,7 @@ def run_repl(provider: str, temperature: float):
                 print(f"  {c(C.CYAN, '/sessions')} — List saved sessions")
                 print(f"  {c(C.CYAN, '/tools')}    — List available tools")
                 print(f"  {c(C.CYAN, '/mcp')}      — List connected MCP servers")
+                print(f"  {c(C.CYAN, '/image')}    — Attach an image (Ctrl+V or Alt+V also works)")
                 print(f"  {c(C.CYAN, '/agents')}   — List named agents")
                 print(f"  {c(C.CYAN, '/agent')}    — Show/switch active agent")
                 print(f"  {c(C.CYAN, '/model')}    — Show/switch provider & model")
@@ -573,6 +616,9 @@ def run_repl(provider: str, temperature: float):
         # Inject CWD context
         cwd = os.getcwd()
         contextualized = f"[CWD: {cwd}]\n{user_input}"
+        user_content = build_user_content(contextualized, image_paths)
+        if image_paths:
+            print(c(C.GRAY, f"  ({len(image_paths)} image(s) attached)"))
 
         # User-prompt hook (non-blocking; output goes to stderr/log)
         try:
@@ -584,7 +630,7 @@ def run_repl(provider: str, temperature: float):
         except Exception:
             pass
 
-        messages.append({"role": "user", "content": contextualized})
+        messages.append({"role": "user", "content": user_content})
         history.append({"role": "user", "content": user_input})
 
         print()

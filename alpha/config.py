@@ -15,7 +15,7 @@ load_dotenv(_PROJECT_ROOT / ".env", override=True)
 
 DEFAULT_PROVIDER = os.getenv("ALPHA_PROVIDER", "deepseek")
 MAX_ITERATIONS = 50
-TOOL_RESULT_MAX_CHARS = 20_000
+TOOL_RESULT_MAX_CHARS = 12_000
 LLM_TIMEOUT = 300  # seconds per LLM call
 
 # ─── Provider configs ───

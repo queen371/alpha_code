@@ -52,6 +52,43 @@ def _convert_tools(openai_tools: list[dict]) -> list[dict]:
     return out
 
 
+_DATA_URL_PREFIX = "data:"
+
+
+def _convert_user_content(content) -> str | list[dict]:
+    """Convert OpenAI user content (str or block list) to Anthropic shape.
+
+    OpenAI image_url blocks become Anthropic image blocks (base64 source).
+    """
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return json.dumps(content, ensure_ascii=False)
+
+    blocks: list[dict] = []
+    for b in content:
+        if not isinstance(b, dict):
+            continue
+        btype = b.get("type")
+        if btype == "text":
+            blocks.append({"type": "text", "text": b.get("text", "")})
+        elif btype == "image_url":
+            url = (b.get("image_url") or {}).get("url", "")
+            if url.startswith(_DATA_URL_PREFIX):
+                # data:<media_type>;base64,<data>
+                head, _, data = url.partition(",")
+                media_type = head[len(_DATA_URL_PREFIX):].split(";", 1)[0] or "image/png"
+                blocks.append(
+                    {
+                        "type": "image",
+                        "source": {"type": "base64", "media_type": media_type, "data": data},
+                    }
+                )
+            else:
+                blocks.append({"type": "image", "source": {"type": "url", "url": url}})
+    return blocks if blocks else ""
+
+
 def _convert_messages(openai_messages: list[dict]) -> tuple[str, list[dict]]:
     """Split system messages out and convert the rest to Anthropic shape.
 
@@ -89,8 +126,7 @@ def _convert_messages(openai_messages: list[dict]) -> tuple[str, list[dict]]:
         flush_tool_results()
 
         if role == "user":
-            text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
-            converted.append({"role": "user", "content": text})
+            converted.append({"role": "user", "content": _convert_user_content(content)})
             continue
 
         if role == "assistant":
