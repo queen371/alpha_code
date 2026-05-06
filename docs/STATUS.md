@@ -1,9 +1,9 @@
 # STATUS DO PROJETO — Alpha Code
-> Ultima atualizacao: 2026-05-04 (DEEP_BUGS V1.1 anexado)
+> Ultima atualizacao: 2026-05-06 (3 ALTOs do DEEP_BUGS V1.1 corrigidos: #D013, #D014, #D015)
 
 ## Estado Geral: REPROVADO PARA PRODUCAO
 
-Audit V1.1 concluido. **1 CRITICO** bloqueador (#101 — 6 testes red commitados na master + sem CI gate). **10 ALTOs** em fila apos o CRITICO. Pendencias do V1.0 confirmadas como ainda abertas + 5 CVEs em deps via pip-audit.
+Audit V1.1 concluido. **1 CRITICO** bloqueador (#101 — 6 testes red commitados na master + sem CI gate). **10 ALTOs** restantes apos correcao de #D013/#D014/#D015. Pendencias do V1.0 confirmadas como ainda abertas + 5 CVEs em deps via pip-audit.
 
 ## Issues Criticas Abertas
 
@@ -26,19 +26,19 @@ Audit V1.1 concluido. **1 CRITICO** bloqueador (#101 — 6 testes red commitados
 | #068 | `_format_result` 2x json.dumps (D004-PERF pendente) | Performance |
 | #102 | Cobertura inadequada de sub-agent blocklist | Testes |
 | #115 | `.env` atual com perms 664 (chmod 600 imediato) | Seguranca |
-| #D013 | Ctrl+C durante run_agent corrompe messages (HTTP 400 nas proximas requests) | Bugs |
-| #D014 | http_request quebrado para HTTPS publico (cert mismatch apos substituicao por IP) | Bugs |
-| #D015 | URL replace falha em hostname uppercase ou IPv6 (DNS rebinding window) | Bugs |
+| ~~#D013~~ | ~~Ctrl+C durante run_agent corrompe messages~~ — **CORRIGIDO 2026-05-06** | Bugs |
+| ~~#D014~~ | ~~http_request quebrado para HTTPS publico (cert mismatch)~~ — **CORRIGIDO 2026-05-06** | Bugs |
+| ~~#D015~~ | ~~URL replace falha em hostname uppercase ou IPv6~~ — **CORRIGIDO 2026-05-06** | Bugs |
 
 ## Resumo da Auditoria V1.1
 
 | Severidade | Quantidade | Status |
 |-----------|------------|--------|
 | CRITICO | 1 | 0 corrigidos |
-| ALTO | 10 | 0 corrigidos |
+| ALTO | 10 | 3 corrigidos no DEEP_BUGS (#D013, #D014, #D015) |
 | MEDIO | 44 | 0 corrigidos |
 | BAIXO | 62 | 0 corrigidos |
-| **TOTAL** | **117** | **0 corrigidos** |
+| **TOTAL** | **117** | **3 corrigidos** |
 
 ## Pendencias do V1.0 confirmadas
 
@@ -73,7 +73,7 @@ Issues do AUDIT V1.0 que continuavam abertas e foram revisitadas:
 ### Sprint 2 — ALTOs (esta semana)
 - [ ] #115 — `chmod 600 .env` (quick fix imediato)
 - [ ] #001, #002, #018, #019, #021, #023, #024, #062, #068, #102
-- [ ] #D013, #D014, #D015 (DEEP_BUGS V1.1) — ver `docs/audits/current/DEEP_BUGS.md`
+- [x] #D013, #D014, #D015 (DEEP_BUGS V1.1) — corrigidos 2026-05-06
 
 ### Sprint 3 — MEDIOs (este mes)
 44 issues — destaque para #118 (codigo morto descobrindo que feature anunciada nao funciona), #117 (system.md desencontrado), #027 (AST blocklist), #066 (limite de messages).

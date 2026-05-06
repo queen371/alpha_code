@@ -8,7 +8,8 @@ Request size and timeout are limited. No credential forwarding.
 
 import asyncio
 import logging
-from urllib.parse import urlparse
+import ssl as _ssl
+from urllib.parse import urlparse, urlunparse
 
 from ..net_utils import (
     is_private_ip_address as _is_private_ip_address,
@@ -21,6 +22,19 @@ logger = logging.getLogger(__name__)
 
 _MAX_RESPONSE_SIZE = 1_000_000  # 1MB
 _ALLOWED_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
+
+
+def _rewrite_url_with_ip(parsed, resolved_ip: str) -> str:
+    """Reconstroi URL trocando hostname pelo IP resolvido.
+
+    urlunparse evita falhas em hostnames uppercase ou IPv6 que `str.replace`
+    deixaria passar (DNS rebinding window). IPv6 ganha brackets no netloc.
+    """
+    ip_for_url = f"[{resolved_ip}]" if ":" in resolved_ip else resolved_ip
+    netloc = f"{ip_for_url}:{parsed.port}" if parsed.port else ip_for_url
+    parts = list(parsed)
+    parts[1] = netloc
+    return urlunparse(parts)
 
 
 async def _http_request(
@@ -64,8 +78,14 @@ async def _http_request(
             return {"error": str(e), "blocked": True}
 
         # Construir URL com IP fixo + header Host para SNI/virtual hosts
-        fixed_url = url.replace(f"://{hostname}", f"://{resolved_ip}", 1)
+        fixed_url = _rewrite_url_with_ip(parsed, resolved_ip)
         req_headers["Host"] = hostname
+
+        # HTTPS: cert e SNI precisam validar contra o hostname original,
+        # nao o IP literal usado na conexao. Ssl context + server_hostname
+        # garantem isso.
+        is_https = parsed.scheme == "https"
+        ssl_param = _ssl.create_default_context() if is_https else False
 
         async with aiohttp.ClientSession() as session:
             req_data = None
@@ -75,15 +95,18 @@ async def _http_request(
                     req_headers.setdefault("Content-Type", "application/json")
                 req_data = body
 
-            resp = await session.request(
+            req_kwargs = dict(
                 method=method,
                 url=fixed_url,
                 headers=req_headers,
                 data=req_data,
                 allow_redirects=False,  # NÃO seguir automaticamente
                 timeout=aiohttp.ClientTimeout(total=timeout),
-                ssl=parsed.scheme == "https",
+                ssl=ssl_param,
             )
+            if is_https:
+                req_kwargs["server_hostname"] = hostname
+            resp = await session.request(**req_kwargs)
 
             # Manual redirect following com re-validação DNS+IP
             redirect_count = 0
@@ -109,19 +132,24 @@ async def _http_request(
                 except ValueError as e:
                     return {"error": f"Redirect bloqueado: {e}", "blocked": True}
 
-                fixed_redirect = redirect_url.replace(
-                    f"://{redirect_hostname}", f"://{redirect_ip}", 1
-                )
+                fixed_redirect = _rewrite_url_with_ip(redirect_parsed, redirect_ip)
                 req_headers["Host"] = redirect_hostname
 
-                resp = await session.request(
+                redirect_is_https = redirect_parsed.scheme == "https"
+                redirect_ssl = (
+                    _ssl.create_default_context() if redirect_is_https else False
+                )
+                redirect_kwargs = dict(
                     method=method,
                     url=fixed_redirect,
                     headers=req_headers,
                     allow_redirects=False,
                     timeout=aiohttp.ClientTimeout(total=timeout),
-                    ssl=redirect_parsed.scheme == "https",
+                    ssl=redirect_ssl,
                 )
+                if redirect_is_https:
+                    redirect_kwargs["server_hostname"] = redirect_hostname
+                resp = await session.request(**redirect_kwargs)
                 redirect_count += 1
 
             # Read response with size limit

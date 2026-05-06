@@ -349,6 +349,29 @@ async def run_agent(
             logger.error(f"Tool execution failed: {e}")
             yield {"type": "error", "message": f"Tool execution failed: {e}"}
             return
+        finally:
+            # If interrupted (Ctrl+C / CancelledError) mid-tool, the assistant
+            # tool_calls may have no matching tool responses, which makes the
+            # provider reject the next request with HTTP 400. Backfill missing
+            # tool messages so the conversation stays well-formed.
+            last_assistant = None
+            for msg in reversed(messages):
+                if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                    last_assistant = msg
+                    break
+            if last_assistant:
+                responded = {
+                    m.get("tool_call_id")
+                    for m in messages
+                    if m.get("role") == "tool"
+                }
+                for tc in last_assistant["tool_calls"]:
+                    if tc["id"] not in responded:
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc["id"],
+                            "content": json.dumps({"error": "interrupted"}),
+                        })
 
     # Max iterations reached
     yield {
