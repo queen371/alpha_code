@@ -40,21 +40,35 @@ async def _load_skill(name: str) -> dict:
     return result
 
 
+def _build_load_skill_description() -> str:
+    """Build description com a lista de skills disponiveis (#D017-PERF)."""
+    try:
+        from ..skills import list_skills, load_all_skills
+        load_all_skills()
+        names = sorted(s.name for s in list_skills())
+    except Exception:
+        names = []
+    base = (
+        "Load the full instructions for a named skill. "
+        "Call this BEFORE performing a task when a matching skill exists — "
+        "it contains critical guidance, commands, and gotchas. "
+        "Call with no name to receive the available list."
+    )
+    if names:
+        base += f" Available skills: {', '.join(names)}."
+    return base
+
+
 register_tool(
     ToolDefinition(
         name="load_skill",
-        description=(
-            "Load the full instructions for a named skill. "
-            "Check the AVAILABLE SKILLS section of your system prompt for names. "
-            "Call this BEFORE performing a task when a matching skill exists — "
-            "it contains critical guidance, commands, and gotchas."
-        ),
+        description=_build_load_skill_description(),
         parameters={
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string",
-                    "description": "The exact skill name from the AVAILABLE SKILLS list",
+                    "description": "The exact skill name (see the Available skills list in this tool's description).",
                 },
             },
             "required": ["name"],

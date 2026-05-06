@@ -15,6 +15,13 @@ def build_skill_index(
     Args:
         name_filter: Optional function to narrow the list (e.g. an AgentScope's
             filter_skills). Receives all names, returns kept names.
+
+    Note (#D017-PERF): a versao antiga inseria N x `index_line` (~6KB para
+    80 skills) no system prompt e isso era retransmitido em cada iteracao
+    do agent loop — ~75K tokens cumulativos numa sessao de 50 turnos.
+    Agora so emite um pointer curto; a lista completa de nomes vai pra
+    description do `load_skill` tool (mais compacta, e a description e parte
+    do tool def que ja e transmitido).
     """
     skills = list_skills()
     if name_filter is not None:
@@ -23,15 +30,23 @@ def build_skill_index(
     if not skills:
         return ""
 
-    lines = [
-        "# AVAILABLE SKILLS",
-        "You have access to specialized skills — structured playbooks for specific tasks.",
-        "When the user's request matches one of these areas, call `load_skill(name)` to load",
-        "the full instructions BEFORE acting. Each skill tells you when to use it and when NOT to.",
-        "",
-    ]
-    lines.extend(s.index_line for s in skills)
-    return "\n".join(lines)
+    return (
+        "# SKILLS\n"
+        "Specialized playbooks are available via the `load_skill(name)` tool. "
+        "The list of available skill names is in that tool's description. "
+        "When a user request matches a skill area, call `load_skill` BEFORE acting."
+    )
+
+
+def list_skill_names_for_tool_description(
+    name_filter: Callable[[list[str]], list[str]] | None = None,
+) -> list[str]:
+    """Lista de nomes de skills para a description do `load_skill`."""
+    skills = list_skills()
+    if name_filter is not None:
+        allowed = set(name_filter([s.name for s in skills]))
+        skills = [s for s in skills if s.name in allowed]
+    return [s.name for s in skills]
 
 
 def inject_skill_index(

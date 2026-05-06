@@ -22,6 +22,39 @@ logger = logging.getLogger(__name__)
 _MAX_ROWS = 500
 _MAX_RESULT_CHARS = 15000
 
+# Pool por connection string para PostgreSQL (#D021-PERF). asyncpg.connect()
+# faz handshake TCP+TLS+auth (~150-500ms remoto); cada describe_table/query
+# abria conexao nova. Pool reusa, drop em sessao termina.
+_pg_pools: dict = {}
+_pg_pools_lock = asyncio.Lock()
+
+
+async def _get_pg_pool(connection: str):
+    """Lazy-init pool por connection string."""
+    pool = _pg_pools.get(connection)
+    if pool is not None:
+        return pool
+    async with _pg_pools_lock:
+        pool = _pg_pools.get(connection)
+        if pool is None:
+            import asyncpg
+            pool = await asyncpg.create_pool(
+                connection, min_size=1, max_size=5, command_timeout=30,
+            )
+            _pg_pools[connection] = pool
+    return pool
+
+
+async def _close_pg_pools() -> None:
+    """Cleanup helper — chamar em shutdown da CLI."""
+    pools = list(_pg_pools.values())
+    _pg_pools.clear()
+    for pool in pools:
+        try:
+            await pool.close()
+        except Exception:
+            pass
+
 # SQL statements that modify data
 _WRITE_PATTERNS = re.compile(
     r"^\s*(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|REPLACE|MERGE)\b",
@@ -182,31 +215,28 @@ async def _query_database(
             return {"error": "Connection string inválida para PostgreSQL"}
 
         try:
-            import asyncpg
+            import asyncpg  # noqa: F401  (validation only; pool import lazily)
         except ImportError:
             return {"error": "asyncpg não instalado. Execute: pip install asyncpg"}
 
         try:
-            conn = await asyncio.wait_for(asyncpg.connect(connection), timeout=10)
-            try:
+            pool = await asyncio.wait_for(_get_pg_pool(connection), timeout=10)
+            async with pool.acquire() as conn:
                 if _is_write_query(query):
                     if read_only:
                         return {"error": "Query de escrita bloqueada em modo read_only"}
                     result = await conn.execute(query)
                     return {"result": result, "query": query}
-                else:
-                    rows = await conn.fetch(query)
-                    rows_list = [dict(r) for r in rows[:_MAX_ROWS]]
-                    columns = list(rows_list[0].keys()) if rows_list else []
-                    return {
-                        "columns": columns,
-                        "rows": rows_list,
-                        "row_count": len(rows_list),
-                        "truncated": len(rows) >= _MAX_ROWS,
-                        "query": query,
-                    }
-            finally:
-                await conn.close()
+                rows = await conn.fetch(query)
+                rows_list = [dict(r) for r in rows[:_MAX_ROWS]]
+                columns = list(rows_list[0].keys()) if rows_list else []
+                return {
+                    "columns": columns,
+                    "rows": rows_list,
+                    "row_count": len(rows_list),
+                    "truncated": len(rows) >= _MAX_ROWS,
+                    "query": query,
+                }
         except TimeoutError:
             return {"error": "Timeout ao conectar ao PostgreSQL"}
         except Exception as e:
@@ -260,13 +290,13 @@ async def _describe_table(connection: str, table: str, db_type: str = "sqlite") 
 
         # Usar parameterized query para PostgreSQL
         try:
-            import asyncpg
+            import asyncpg  # noqa: F401
         except ImportError:
             return {"error": "asyncpg não instalado. Execute: pip install asyncpg"}
 
         try:
-            conn = await asyncio.wait_for(asyncpg.connect(connection), timeout=10)
-            try:
+            pool = await asyncio.wait_for(_get_pg_pool(connection), timeout=10)
+            async with pool.acquire() as conn:
                 rows = await conn.fetch(
                     "SELECT column_name, data_type, is_nullable, column_default "
                     "FROM information_schema.columns WHERE table_name = $1 "
@@ -281,8 +311,6 @@ async def _describe_table(connection: str, table: str, db_type: str = "sqlite") 
                     "row_count": len(rows_list),
                     "query": f"DESCRIBE {table}",
                 }
-            finally:
-                await conn.close()
         except TimeoutError:
             return {"error": "Timeout ao conectar ao PostgreSQL"}
         except Exception as e:

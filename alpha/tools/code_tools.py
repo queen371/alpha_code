@@ -6,6 +6,7 @@ exfiltration (httpx, aiohttp, requests, duckduckgo_search).
 The blocklist is best-effort — NOT a real sandbox. Single-user only.
 """
 
+import ast
 import asyncio
 import logging
 import os
@@ -105,21 +106,83 @@ _BLOCKED_IMPORT_PATTERNS = [
 ]
 _BLOCKED_IMPORT_RE = re.compile("|".join(_BLOCKED_IMPORT_PATTERNS), re.MULTILINE)
 
+# AST-based blocklists (#D018-PERF + #027/#075/#084 V1.1):
+# Substitui a busca em alternation regex de 35+ ramos com MULTILINE
+# (175K tentativas no pior caso para 5KB de codigo) por um AST walk
+# linear e tambem elimina falsos positivos como `\bopen\s*\(.*(w|a|x)` que
+# casava em `open("read.txt")`.
+_BLOCKED_MODULES = frozenset({
+    "os", "subprocess", "shutil", "sys", "importlib", "ctypes", "signal",
+    "pathlib", "socket", "pty", "code", "multiprocessing", "webbrowser",
+    "http", "urllib",
+    "httpx", "requests", "aiohttp",
+    "duckduckgo_search", "ddgs", "dotenv",
+    "pickle", "marshal", "runpy", "inspect", "gc", "platform", "dis",
+})
+
+_BLOCKED_CALL_NAMES = frozenset({
+    "__import__", "eval", "exec", "compile", "breakpoint",
+    "globals", "getattr", "vars", "chr",
+})
+
+_BLOCKED_NAME_TOKENS = frozenset({
+    "__loader__", "__builtins__", "__subclasses__",
+})
+
+_OPEN_WRITE_MODES = frozenset({"w", "wb", "a", "ab", "x", "xb", "w+", "r+", "rb+"})
+
 
 def _validate_code_safety(code: str) -> str | None:
-    """Static analysis: reject code with dangerous imports/calls.
+    """Static analysis via AST. Returns error message or None if safe."""
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        # Sintaxe invalida e detectada pelo subprocess do executor;
+        # nao e nossa responsabilidade aqui. Permitir.
+        return None
 
-    Returns error message or None if safe.
-    """
-    match = _BLOCKED_IMPORT_RE.search(code)
-    if match:
-        snippet = match.group(0).strip()[:60]
-        return (
-            f"Código bloqueado por segurança: '{snippet}' não é permitido. "
-            f"Módulos como os, subprocess, shutil, sys, ctypes são bloqueados. "
-            f"Use as ferramentas do agente (execute_shell, write_file) para operações de sistema."
-        )
+    for node in ast.walk(tree):
+        # import X / from X import ...
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".")[0]
+                if root in _BLOCKED_MODULES:
+                    return _format_block(f"import {alias.name}")
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                root = node.module.split(".")[0]
+                if root in _BLOCKED_MODULES:
+                    return _format_block(f"from {node.module} import ...")
+        # eval/exec/compile/getattr/chr/__import__/breakpoint(...)
+        elif isinstance(node, ast.Call):
+            fn = node.func
+            fname = None
+            if isinstance(fn, ast.Name):
+                fname = fn.id
+            elif isinstance(fn, ast.Attribute):
+                fname = fn.attr
+            if fname in _BLOCKED_CALL_NAMES:
+                return _format_block(f"{fname}(...)")
+            # open(path, "w") — block apenas modo de escrita real
+            if fname == "open" and len(node.args) >= 2:
+                mode_node = node.args[1]
+                if isinstance(mode_node, ast.Constant) and isinstance(mode_node.value, str):
+                    if mode_node.value in _OPEN_WRITE_MODES:
+                        return _format_block(f"open(..., {mode_node.value!r})")
+        # __builtins__ / __loader__ / x.__subclasses__()
+        elif isinstance(node, ast.Name) and node.id in _BLOCKED_NAME_TOKENS:
+            return _format_block(node.id)
+        elif isinstance(node, ast.Attribute) and node.attr in _BLOCKED_NAME_TOKENS:
+            return _format_block(f".{node.attr}")
     return None
+
+
+def _format_block(snippet: str) -> str:
+    return (
+        f"Código bloqueado por segurança: '{snippet[:60]}' não é permitido. "
+        f"Módulos como os, subprocess, shutil, sys, ctypes são bloqueados. "
+        f"Use as ferramentas do agente (execute_shell, write_file) para operações de sistema."
+    )
 
 
 # ─── Tools ───

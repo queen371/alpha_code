@@ -239,12 +239,21 @@ async def extract_page_content(url: str, timeout: float = 10.0, max_chars: int =
     return text[:max_chars]
 
 
+# Pre-compiladas: o cache interno do `re` (limite 512) podia evictar essas em
+# codebase grande, e re-compilar `<(script|style)...>` com flags DOTALL+ICASE
+# em hot path de extract_multiple_pages multiplicava o custo (#D014-PERF).
+_RE_SCRIPT_STYLE = re.compile(
+    r"<(script|style)[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE
+)
+_RE_TAGS = re.compile(r"<[^>]+>")
+_RE_WS = re.compile(r"\s+")
+
+
 def _strip_html(html: str) -> str:
     """Remove tags HTML e colapsa whitespace."""
-    html = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", html, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r"<[^>]+>", " ", html)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+    html = _RE_SCRIPT_STYLE.sub("", html)
+    text = _RE_TAGS.sub(" ", html)
+    return _RE_WS.sub(" ", text).strip()
 
 
 async def extract_multiple_pages(

@@ -76,6 +76,13 @@ Nenhuma issue ALTO pendente do AUDIT_V1.1. (DEEPs ainda tem MEDIO/BAIXO em fila.
 | #DL017 | Error structure inconsistente | 2026-05-06 | `_annotate_error` adiciona `{ok:false, category}` em todos os caminhos |
 | #DL018 | `/load` sobrescreve sessao original | 2026-05-06 | `/load` gera novo id por default; `--inplace` preserva comportamento antigo |
 | #DL020 | Loop detection 2a system message | 2026-05-06 | role=user (com prefix `[ALPHA SYSTEM NOTE]`) em vez de role=system tardia |
+| #D014-PERF | `_strip_html` re-compila regex | 2026-05-06 | 3 regex pre-compilados como module-level |
+| #D017-PERF | Skill index 6KB no system prompt | 2026-05-06 | Lista movida para description do `load_skill`; system prompt fica curto |
+| #D018-PERF | `_BLOCKED_IMPORT_RE` 35+ alternations | 2026-05-06 | AST walk substitui regex; cobre falsos positivos (`open("read.txt")`) |
+| #D019-PERF | `_extract_relevant_context` lower per msg | 2026-05-06 | Co-fixed por #019/#118 (funcao removida) |
+| #D021-PERF | DB connection per call | 2026-05-06 | `_get_pg_pool` lazy pool por connection string |
+| #D023-PERF | `_recent_results` json.dumps inteiro | 2026-05-06 | `_result_preview` campo-a-campo para 500 chars sem serializar tudo |
+| #D024-PERF | `_search_and_replace` N reads/writes | 2026-05-06 | Single read + replace + write por arquivo |
 
 ---
 

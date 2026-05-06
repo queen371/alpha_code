@@ -219,23 +219,49 @@ async def _search_and_replace(
             "message": "Execute com dry_run=false para aplicar as mudanças",
         }
 
-    # Apply replacements via edit_file (enforces workspace + symlink validation)
-    # edit_file replaces one occurrence at a time, so loop until no more matches
+    # Apply replacements: read once, replace ALL in memory, write once.
+    # A versao antiga chamava edit_file ate 500 vezes por arquivo, fazendo
+    # 500 read + 500 write para arquivos com muitas ocorrencias (#D024-PERF).
+    # Reuso `_validate_path_no_symlink` de file_tools para preservar a
+    # validacao defense-in-depth.
+    import os
+    from .file_tools import _validate_path_no_symlink
+
     changed_files = []
     errors = []
-    _MAX_REPLACEMENTS_PER_FILE = 500  # safety limit
 
     for filepath in files_to_change:
-        file_replaced = 0
-        for _ in range(_MAX_REPLACEMENTS_PER_FILE):
-            result = await _run_tool("edit_file", path=filepath, old_text=search, new_text=replace)
-            if "error" in result:
-                if file_replaced == 0:
-                    errors.append({"file": filepath, "error": result["error"]})
-                break  # no more occurrences (or real error on first try)
-            file_replaced += result.get("replaced", 1)
-        if file_replaced > 0:
-            changed_files.append({"file": filepath, "replacements": file_replaced})
+        try:
+            p = _validate_path_no_symlink(filepath)
+        except (PermissionError, OSError) as e:
+            errors.append({"file": filepath, "error": str(e)})
+            continue
+        if not p.exists():
+            errors.append({"file": filepath, "error": "Arquivo não encontrado"})
+            continue
+        try:
+            original = p.read_text(errors="replace")
+        except OSError as e:
+            errors.append({"file": filepath, "error": str(e)})
+            continue
+        count = original.count(search)
+        if count == 0:
+            continue
+        updated = original.replace(search, replace)
+        # Single write — same atomic open pattern de edit_file
+        try:
+            flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            fd = os.open(str(p), flags, 0o644)
+            try:
+                os.write(fd, updated.encode("utf-8"))
+            finally:
+                os.close(fd)
+        except OSError as e:
+            errors.append({"file": filepath, "error": str(e)})
+            continue
+        changed_files.append({"file": filepath, "replacements": count})
 
     return {
         "dry_run": False,

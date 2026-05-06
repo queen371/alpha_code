@@ -38,6 +38,28 @@ def _call_signature(tc: dict) -> str:
     return f"{tc['name']}:{tc['arguments']}"
 
 
+def _result_preview(result: object, limit: int = 500) -> str:
+    """Construir preview barato de tool result para `_recent_results`.
+
+    Substitui `json.dumps(result, ensure_ascii=False, default=str)[:500]`
+    que serializava 100KB+ inteiros so para descartar tudo apos 500 chars
+    (#D023-PERF). Constroi a preview campo-a-campo cortando cada valor a
+    200 chars e parando ao saturar `limit`. Resultado logico equivalente
+    para deteccao de stale progress.
+    """
+    if not isinstance(result, dict):
+        return str(result)[:limit]
+    parts: list[str] = []
+    remaining = limit
+    for k, v in result.items():
+        if remaining <= 0:
+            break
+        chunk = f"{k}={str(v)[:200]} "
+        parts.append(chunk[:remaining])
+        remaining -= len(chunk)
+    return "".join(parts)[:limit]
+
+
 def _parse_args_values(args_str: str) -> list[str]:
     """Extract individual argument values from JSON args for comparison."""
     try:
@@ -380,8 +402,7 @@ async def run_agent(
                 # Track tool results for stale progress detection
                 if event.get("type") == "tool_result":
                     result = event.get("result", {})
-                    result_str = json.dumps(result, ensure_ascii=False, default=str)
-                    _recent_results.append(result_str[:500])
+                    _recent_results.append(_result_preview(result, 500))
                     # Truncar para evitar leak de memoria em sessoes longas;
                     # `_recent_calls` ja faz isso, `_recent_results` nao fazia.
                     if len(_recent_results) > _CYCLE_WINDOW * 3:
