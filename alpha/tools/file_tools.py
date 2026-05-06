@@ -1,5 +1,6 @@
 """File operation tools for ALPHA agent."""
 
+import asyncio
 import logging
 import os
 import re
@@ -284,25 +285,33 @@ async def _search_files(pattern: str, path: str = ".", max_results: int = 50) ->
     results = []
     try:
         regex = re.compile(pattern, re.IGNORECASE)
-        # Validate regex complexity: test against a pathological string to detect catastrophic backtracking
-        import signal
-
-        def _timeout_handler(signum, frame):
-            raise TimeoutError("Regex too complex")
-
-        old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
-        signal.alarm(1)  # 1 second max for test match
-        try:
-            regex.search("a" * 1000)
-        except TimeoutError:
-            return {
-                "error": "Regex muito complexo (possível backtracking exponencial). Simplifique o padrão."
-            }
-        finally:
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, old_handler)
     except re.error as e:
         return {"error": f"Regex inválido: {e}"}
+
+    # Validate regex complexity in a subprocess so the timeout funciona em
+    # qualquer thread (sub-agent, parallel) e em Windows. SIGALRM so funciona
+    # na main thread em POSIX, e nao existe em Windows.
+    import sys
+    validator_code = (
+        "import re,sys;"
+        f"re.compile({pattern!r}, re.IGNORECASE).search('a'*1000)"
+    )
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, "-c", validator_code,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=1.0)
+    except asyncio.TimeoutError:
+        proc.kill()
+        try:
+            await proc.wait()
+        except Exception:
+            pass
+        return {
+            "error": "Regex muito complexo (possível backtracking exponencial). Simplifique o padrão."
+        }
 
     for root, _dirs, files in os.walk(str(p)):
         if len(results) >= max_results:

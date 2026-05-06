@@ -7,6 +7,7 @@ Includes retry with exponential backoff, jitter, and rate-limit handling.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import random
@@ -87,8 +88,12 @@ def _recover_tool_call_from_content(content: str) -> dict | None:
     else:
         return None
 
+    # SHA1 (truncado) em vez de hash() — Python's hash() e seed-randomizado
+    # entre processos, gerando ids instaveis ao replay/restore de sessao.
+    # SHA1 e deterministico por input, com colisao desprezivel para uma sessao.
+    digest = hashlib.sha1((name + args_str).encode("utf-8")).hexdigest()[:8]
     return {
-        "id": f"call_recovered_{abs(hash(name + args_str)) % 10**8:08x}",
+        "id": f"call_recovered_{digest}",
         "name": name,
         "arguments": args_str,
     }

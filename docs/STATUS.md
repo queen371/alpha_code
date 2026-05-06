@@ -21,8 +21,6 @@ Nenhuma issue critica pendente. (#101 verificado como ja resolvido — ver "Reso
 
 | # | Issue | Categoria | Fonte | Arquivo |
 |---|-------|-----------|-------|---------|
-| #001 | `_recover_tool_call_from_content` IDs nao-unicos | Bugs | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `alpha/llm.py` |
-| #002 | `signal.SIGALRM` quebra fora da main thread | Bugs | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `alpha/executor.py` |
 | #018 | Sub-agents auto-aprovam `browser_*` + `git_operation` write | Seguranca | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `alpha/agents/runner.py` |
 | #019 | Tool results de parent no prompt do sub-agent (prompt injection) | Seguranca | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `alpha/agents/runner.py` |
 | #023 | `BROWSER_DOMAIN_ALLOWLIST` vazio = fail-open | Seguranca | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `alpha/tools/browser_tools.py` |
@@ -43,6 +41,8 @@ Nenhuma issue critica pendente. (#101 verificado como ja resolvido — ver "Reso
 | #D013 | Ctrl+C corrompe messages | 2026-05-06 | `finally` em `agent.py` injeta tool placeholders (commit `cffdb6c`) |
 | #D014 | HTTPS quebrado por cert mismatch | 2026-05-06 | `server_hostname` + `ssl.create_default_context()` em `network_tools.py` |
 | #D015 | URL replace falha em uppercase/IPv6 | 2026-05-06 | `_rewrite_url_with_ip` via `urlunparse` cobre os casos |
+| #001 | `_recover_tool_call_from_content` IDs nao-unicos | 2026-05-06 | `hashlib.sha1[:8]` em vez de `hash() % 10**8` (estavel entre processos) |
+| #002 | `signal.SIGALRM` quebra fora da main thread | 2026-05-06 | Validacao de regex complexity via `asyncio.create_subprocess_exec` + `wait_for` |
 
 ---
 
@@ -63,8 +63,8 @@ Nenhuma issue critica pendente. (#101 verificado como ja resolvido — ver "Reso
 
 ## SPRINT ATUAL — restos de ALTO do V1.1
 
-- [ ] #001 — `_recover_tool_call_from_content` IDs nao-unicos
-- [ ] #002 — `signal.SIGALRM` quebra fora da main thread
+- [x] #001 — `_recover_tool_call_from_content` IDs nao-unicos (2026-05-06)
+- [x] #002 — `signal.SIGALRM` quebra fora da main thread (2026-05-06)
 - [ ] #018 — Sub-agents auto-aprovam browser_* + git write
 - [ ] #019 — Prompt injection via parent tool results
 - [ ] #023 — Browser allowlist vazia = fail-open
@@ -73,7 +73,7 @@ Nenhuma issue critica pendente. (#101 verificado como ja resolvido — ver "Reso
 - [ ] #068 — `_format_result` 2x json.dumps
 - [ ] #102 — Cobertura de sub-agent blocklist
 
-**Progresso:** 5 de 14 ALTOs originais concluidos (incluindo #021/#115/#D013/#D014/#D015).
+**Progresso:** 7 de 14 ALTOs originais concluidos (#001/#002/#021/#101/#115/#D013/#D014/#D015).
 
 ---
 
@@ -98,7 +98,7 @@ Nenhuma issue critica pendente. (#101 verificado como ja resolvido — ver "Reso
 |---------|-------|
 | Issues encontradas (V1.0 + V1.1 + DEEPs) | ~360 acumuladas |
 | Issues criticas pendentes | **0** |
-| Issues ALTO pendentes (V1.1) | 7 |
+| Issues ALTO pendentes (V1.1) | 5 |
 | Issues no V1.1 (geral) | 117 (5 verificadas resolvidas) |
 | Suite de testes | 151/151 verde |
 | CI gate | Ativo (Py 3.11 + 3.12) |
