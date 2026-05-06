@@ -23,6 +23,47 @@ logger = logging.getLogger(__name__)
 _SUBAGENT_PROMPT_PATH = Path(__file__).parent.parent.parent / "prompts" / "subagent.md"
 _SCRATCH_SUBDIR = Path(".alpha") / "runs"
 
+# ─── Sub-agent safety policy (referenciado pelos testes em test_subagent_blocked.py) ───
+#
+# DESTRUCTIVE tools que sao removidas do toolset do sub-agent quando nao
+# existe approval callback do parent. Cobre:
+# - shell/pipeline/http/db/clipboard/install: side effects fora do workspace
+# - browser_*: JS arbitrario, click/fill em sessao logada (cookie/form exfil)
+#
+# Nao listadas aqui (mas tambem DESTRUCTIVE):
+# - write_file, edit_file, execute_python, search_and_replace, run_tests:
+#   auto-aprovadas por politica geral (AUTO_APPROVE_TOOLS) — comportamento
+#   intencional do system.md
+# - delegate_task, delegate_parallel: bloqueadas separadamente para evitar
+#   recursao
+# - present_plan: ferramenta de planejamento, nao tem efeito real
+# - git_operation: gating dinamico via _auto_approve_no_callback abaixo
+SUBAGENT_DESTRUCTIVE_BLOCKLIST = frozenset({
+    "execute_shell", "execute_pipeline", "http_request",
+    "query_database", "clipboard_write", "install_package",
+    "browser_click", "browser_fill", "browser_select_option",
+    "browser_press_key", "browser_execute_js",
+})
+
+# Read-only git actions que sub-agents podem chamar sem callback.
+# Write actions (push/merge/rebase/reset/clean/...) sao rejeitadas.
+GIT_READ_ACTIONS = frozenset({
+    "status", "diff", "log", "branch", "show", "blame",
+    "stash_list", "remote", "tag",
+})
+
+
+def _auto_approve_no_callback(name: str, args: dict) -> bool:
+    """Approval default quando sub-agent nao tem callback humano.
+
+    Aprova qualquer tool por default (ja que tools perigosas estao removidas
+    via SUBAGENT_DESTRUCTIVE_BLOCKLIST), exceto git_operation onde precisamos
+    distinguir read de write actions.
+    """
+    if name == "git_operation":
+        return (args or {}).get("action") in GIT_READ_ACTIONS
+    return True
+
 
 def _load_subagent_prompt() -> str:
     if _SUBAGENT_PROMPT_PATH.exists():
@@ -123,20 +164,13 @@ async def _run_subagent(
     ]
 
     # Get tools — filter out delegate tools to prevent recursion
-    # Also block destructive tools that could bypass approval if no callback
+    # Also block destructive tools that could bypass approval if no callback.
+    # Policy lives in SUBAGENT_DESTRUCTIVE_BLOCKLIST (module level) so tests
+    # can validate the surface independently of an actual run.
     _blocked = {"delegate_task", "delegate_parallel"}
-    _destructive_without_approval = {
-        "execute_shell", "execute_pipeline", "http_request",
-        "query_database", "clipboard_write", "install_package",
-        # Browser interaction — JS execution, form fill e click podem
-        # exfiltrar cookies/tokens da sessao logada do navegador.
-        "browser_click", "browser_fill", "browser_select_option",
-        "browser_press_key", "browser_execute_js",
-    }
     all_tools = get_openai_tools()
     if parent_approval_callback is None:
-        # No approval callback = read-only mode for sub-agents
-        _blocked = _blocked | _destructive_without_approval
+        _blocked = _blocked | SUBAGENT_DESTRUCTIVE_BLOCKLIST
     tools = [t for t in all_tools if t["function"]["name"] not in _blocked]
 
     if tools_filter:
@@ -161,22 +195,9 @@ async def _run_subagent(
     tool_calls_made = []
     errors = []
 
-    # Sub-agents use parent's approval callback if available,
-    # otherwise auto-approve only safe tools (destructive ones are blocked above).
-    # git_operation needs args-aware gating: read actions (status/log/diff/...)
-    # are auto-approved, write actions (push/merge/rebase/reset/clean/...) are
-    # rejected when no human callback is wired. Removing the tool entirely
-    # would break sub-agents that just want to inspect repo state.
-    _GIT_READ_ACTIONS = {
-        "status", "diff", "log", "branch", "show", "blame",
-        "stash_list", "remote", "tag",
-    }
-
-    def _auto_approve_no_callback(name: str, args: dict) -> bool:
-        if name == "git_operation":
-            return (args or {}).get("action") in _GIT_READ_ACTIONS
-        return True
-
+    # Sub-agents use parent's approval callback if available, otherwise the
+    # module-level _auto_approve_no_callback gate (handles git_operation
+    # read/write distinction).
     effective_approval = parent_approval_callback or _auto_approve_no_callback
 
     try:

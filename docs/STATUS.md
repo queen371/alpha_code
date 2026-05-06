@@ -24,7 +24,6 @@ Nenhuma issue critica pendente. (#101 verificado como ja resolvido — ver "Reso
 | #019 | Tool results de parent no prompt do sub-agent (prompt injection) | Seguranca | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `alpha/agents/runner.py` |
 | #062 | `compress_context` sem fallback de truncacao | Resiliencia | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `alpha/context.py` |
 | #068 | `_format_result` 2x json.dumps | Performance | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `alpha/executor.py` |
-| #102 | Cobertura inadequada de sub-agent blocklist | Testes | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `tests/test_approval.py` |
 
 ---
 
@@ -43,6 +42,7 @@ Nenhuma issue critica pendente. (#101 verificado como ja resolvido — ver "Reso
 | #024 | `lxml` 6.0.2 CVE-2026-41066 | 2026-05-06 | Pin `lxml>=6.1.0` em pyproject.toml + upgrade venv; `pip-audit` confirma |
 | #018 | Sub-agents auto-aprovam `browser_*` + git write | 2026-05-06 | Browser interaction tools no `_destructive_without_approval`; git_operation write actions rejeitadas via `_auto_approve_no_callback` |
 | #023 | Browser allowlist vazia = fail-open | 2026-05-06 | Flag `ALPHA_BROWSER_REQUIRE_ALLOWLIST=1` ativa fail-closed; warning quando flag esta off e allowlist vazia |
+| #102 | Cobertura inadequada de sub-agent blocklist | 2026-05-06 | `tests/test_subagent_blocked.py` (10 testes); blocklist e gate de git agora a nivel de modulo |
 
 ---
 
@@ -71,9 +71,9 @@ Nenhuma issue critica pendente. (#101 verificado como ja resolvido — ver "Reso
 - [x] #024 — `lxml` CVE-2026-41066 (bump versao) (2026-05-06)
 - [ ] #062 — `compress_context` fallback de truncacao
 - [ ] #068 — `_format_result` 2x json.dumps
-- [ ] #102 — Cobertura de sub-agent blocklist
+- [x] #102 — Cobertura de sub-agent blocklist (2026-05-06)
 
-**Progresso:** 10 de 14 ALTOs originais concluidos (#001/#002/#018/#021/#023/#024/#101/#115/#D013/#D014/#D015).
+**Progresso:** 11 de 14 ALTOs originais concluidos (#001/#002/#018/#021/#023/#024/#101/#102/#115/#D013/#D014/#D015).
 
 ---
 
@@ -98,9 +98,9 @@ Nenhuma issue critica pendente. (#101 verificado como ja resolvido — ver "Reso
 |---------|-------|
 | Issues encontradas (V1.0 + V1.1 + DEEPs) | ~360 acumuladas |
 | Issues criticas pendentes | **0** |
-| Issues ALTO pendentes (V1.1) | 4 |
+| Issues ALTO pendentes (V1.1) | 3 |
 | Issues no V1.1 (geral) | 117 (5 verificadas resolvidas) |
-| Suite de testes | 151/151 verde |
+| Suite de testes | 161/161 verde |
 | CI gate | Ativo (Py 3.11 + 3.12) |
 | MVP bloqueadores | Nao avaliado (sem MVP_PLAN) |
 
