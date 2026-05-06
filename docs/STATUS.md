@@ -98,7 +98,7 @@ Nenhuma issue critica pendente. (#101 verificado como ja resolvido — ver "Reso
 |---------|-------|
 | Issues encontradas (V1.0 + V1.1 + DEEPs) | ~360 acumuladas |
 | Issues criticas pendentes | **0** |
-| Issues ALTO pendentes (V1.1) | 2 |
+| Issues ALTO pendentes (V1.1) | 4 |
 | Issues no V1.1 (geral) | 117 (5 verificadas resolvidas) |
 | Suite de testes | 151/151 verde |
 | CI gate | Ativo (Py 3.11 + 3.12) |
