@@ -106,17 +106,15 @@ async def _run_subagent(
     label: str = "",
     stream_to_parent: bool = True,
     parent_approval_callback=None,
-    parent_messages: list[dict] | None = None,
 ) -> dict:
     """
     Core sub-agent runner with isolated context.
 
-    Sub-agents receive only the task-relevant context, not the full parent
-    conversation. This protects the parent's context window and focuses
-    the sub-agent on its specific task.
-
-    If parent_messages is provided, a compact summary of relevant context
-    is extracted and injected into the sub-agent's system prompt.
+    Sub-agents receive only the task and an optional explicit `context`
+    string from the caller — never raw parent messages or tool results.
+    Esse isolamento e proposital: messages do parent podem conter saida de
+    URLs/arquivos controlados por atacante, e injeta-las no prompt do
+    sub-agent vira vetor de prompt-injection cross-agent.
     """
 
     # Lazy imports to avoid circular dependencies
@@ -137,11 +135,6 @@ async def _run_subagent(
     # Build isolated context for the sub-agent
     system_prompt = _load_subagent_prompt()
 
-    # Extract relevant context from parent conversation if available
-    parent_context = ""
-    if parent_messages:
-        parent_context = _extract_relevant_context(parent_messages, task)
-
     task_content = (
         f"[CWD: {workspace_root}]\n"
         f"[AGENT_ID: {agent_id}]\n"
@@ -149,11 +142,6 @@ async def _run_subagent(
         "Write any artifacts, logs, or intermediate files to SCRATCH_DIR. "
         "You may read anything under CWD.\n\n"
     )
-    if parent_context:
-        task_content += (
-            f"[CONTEXT FROM PARENT AGENT]\n{parent_context}\n"
-            "[END PARENT CONTEXT]\n\n"
-        )
     if context:
         task_content += f"Context: {context}\n\n"
     task_content += task
@@ -243,71 +231,6 @@ async def _run_subagent(
         result["errors"] = errors
 
     return result
-
-
-def _extract_relevant_context(
-    parent_messages: list[dict], task: str, max_chars: int = 2000
-) -> str:
-    """
-    Extract task-relevant context from parent conversation.
-
-    Filters parent messages to include only those relevant to the delegated task.
-    Keeps the context compact to avoid polluting the sub-agent's window.
-    """
-    # Extract keywords from task for relevance matching
-    task_lower = task.lower()
-    task_words = set(task_lower.split())
-    # Remove common stop words
-    stop_words = {"the", "a", "an", "is", "are", "was", "were", "in", "on", "at",
-                  "to", "for", "of", "and", "or", "not", "this", "that", "with",
-                  "o", "a", "os", "as", "de", "do", "da", "em", "no", "na",
-                  "um", "uma", "para", "com", "por", "que", "e", "ou", "nao"}
-    task_words -= stop_words
-
-    relevant_parts = []
-    total_chars = 0
-
-    for msg in parent_messages:
-        role = msg.get("role", "")
-        content = msg.get("content") or ""
-
-        if role == "system":
-            continue
-
-        # Check relevance: does this message contain task-related keywords?
-        content_lower = content.lower()
-        relevance = sum(1 for w in task_words if w in content_lower)
-
-        if relevance == 0 and role == "tool":
-            continue  # Skip irrelevant tool results entirely
-
-        # Include user/assistant messages (they provide conversation flow)
-        # and relevant tool results
-        if role == "user":
-            text = content
-            if text.startswith("[CWD:"):
-                text = text.split("\n", 1)[-1] if "\n" in text else text
-            snippet = f"[user]: {text[:300]}"
-        elif role == "assistant":
-            if msg.get("tool_calls"):
-                tc_names = [
-                    tc.get("function", {}).get("name", "?")
-                    for tc in msg.get("tool_calls", [])
-                ]
-                snippet = f"[assistant called: {', '.join(tc_names)}]"
-            else:
-                snippet = f"[assistant]: {content[:300]}"
-        elif role == "tool" and relevance > 0:
-            snippet = f"[tool result]: {content[:400]}"
-        else:
-            continue
-
-        if total_chars + len(snippet) > max_chars:
-            break
-        relevant_parts.append(snippet)
-        total_chars += len(snippet)
-
-    return "\n".join(relevant_parts)
 
 
 # ── Single delegation ─────────────────────────────────────────

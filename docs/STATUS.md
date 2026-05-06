@@ -4,10 +4,10 @@
 
 ---
 
-## Estado Geral: EM PROGRESSO
+## Estado Geral: ALTOs DO V1.1 ZERADOS — EM PROGRESSO NOS DEEPs
 
 ### Resumo
-Audit V1.1 reportou 1 CRITICO + 10 ALTOs em 2026-05-04. Verificacao no codigo hoje (2026-05-06) mostra que o CRITICO ja estava resolvido (testes renomeados/reescritos + CI workflow ja existente) e que 5 ALTOs tambem ja foram corrigidos (3 hoje via DEEP_BUGS, 2 antes via outros commits). Restam **7 ALTOs ativos** focados em seguranca de sub-agents, prompt injection, browser allowlist e CVE em deps. Suite de testes 151/151 verde. Nenhum bloqueador de CI.
+Audit V1.1 reportou 1 CRITICO + 10 ALTOs em 2026-05-04. Apos sessao de fixes em 2026-05-06: **0 CRITICOs e 0 ALTOs do V1.1 ativos.** 14 issues ALTO/CRITICO fechadas (incluindo 3 ALTOs do DEEP_BUGS) + 2 MEDIOs co-fixados (#005, #118). Restam MEDIOs/BAIXOs distribuidos entre os 6 audits DEEP. Suite 168/168 verde, CI ativo (Py 3.11+3.12).
 
 ---
 
@@ -19,9 +19,7 @@ Nenhuma issue critica pendente. (#101 verificado como ja resolvido — ver "Reso
 
 ## ISSUES ALTAS ABERTAS
 
-| # | Issue | Categoria | Fonte | Arquivo |
-|---|-------|-----------|-------|---------|
-| #019 | Tool results de parent no prompt do sub-agent (prompt injection) | Seguranca | [AUDIT V1.1](audits/current/AUDIT_V1.1.md) | `alpha/agents/runner.py` |
+Nenhuma issue ALTO pendente do AUDIT_V1.1. (DEEPs ainda tem MEDIO/BAIXO em fila.)
 
 ---
 
@@ -44,6 +42,8 @@ Nenhuma issue critica pendente. (#101 verificado como ja resolvido — ver "Reso
 | #068 | `_format_result` 2x json.dumps | 2026-05-06 | Estimativa cheap + preview clipado por campo elimina o segundo dump e o corte unicode-corrompido |
 | #005 | Truncated JSON corrupted | 2026-05-06 | Co-fixed com #068 (preview por campo evita corte no meio de escape) |
 | #062 | `compress_context` sem fallback de truncacao | 2026-05-06 | Fail-counter (>=2 empty/exception) cai em `_hard_truncate` que poda tool orfas; 7 testes adicionados |
+| #019 | Prompt injection via parent tool results | 2026-05-06 | Vetor eliminado por remocao do caminho (co-fix com #118 — `_extract_relevant_context` deletada) |
+| #118 | `_extract_relevant_context` e codigo morto | 2026-05-06 | Funcao + parametro `parent_messages` deletados; sub-agents recebem so task + context explicito |
 
 ---
 
@@ -67,14 +67,14 @@ Nenhuma issue critica pendente. (#101 verificado como ja resolvido — ver "Reso
 - [x] #001 — `_recover_tool_call_from_content` IDs nao-unicos (2026-05-06)
 - [x] #002 — `signal.SIGALRM` quebra fora da main thread (2026-05-06)
 - [x] #018 — Sub-agents auto-aprovam browser_* + git write (2026-05-06)
-- [ ] #019 — Prompt injection via parent tool results
+- [x] #019 — Prompt injection via parent tool results (2026-05-06)
 - [x] #023 — Browser allowlist vazia = fail-open (2026-05-06)
 - [x] #024 — `lxml` CVE-2026-41066 (bump versao) (2026-05-06)
 - [x] #062 — `compress_context` fallback de truncacao (2026-05-06)
 - [x] #068 — `_format_result` 2x json.dumps (2026-05-06)
 - [x] #102 — Cobertura de sub-agent blocklist (2026-05-06)
 
-**Progresso:** 13 de 14 ALTOs originais concluidos (#001/#002/#018/#023/#024/#062/#068/#101/#102/#115/#D013/#D014/#D015 + #021 verificado).
+**Progresso:** 14 de 14 ALTOs originais concluidos (#001/#002/#018/#019/#023/#024/#062/#068/#101/#102/#115/#D013/#D014/#D015 + #021 verificado). +1 MEDIO de bonus (#118).
 
 ---
 
@@ -99,7 +99,7 @@ Nenhuma issue critica pendente. (#101 verificado como ja resolvido — ver "Reso
 |---------|-------|
 | Issues encontradas (V1.0 + V1.1 + DEEPs) | ~360 acumuladas |
 | Issues criticas pendentes | **0** |
-| Issues ALTO pendentes (V1.1) | 1 |
+| Issues ALTO pendentes (V1.1) | 0 |
 | Issues no V1.1 (geral) | 117 (5 verificadas resolvidas) |
 | Suite de testes | 168/168 verde |
 | CI gate | Ativo (Py 3.11 + 3.12) |
