@@ -81,22 +81,41 @@ def _is_write_query(query: str) -> bool:
 
 
 def _is_dangerous_query(sql: str) -> str | None:
-    """Retorna mensagem de erro se a query é perigosa, None se OK."""
+    """Retorna mensagem de erro se a query é perigosa, None se OK.
+
+    Multi-statement detector (#030): segue o SQL standard onde a unica
+    forma de escapar uma quote dentro de string e doubled-quote (`''`).
+    O backslash (`\\'`) NAO escapa em SQL standard (Postgres com
+    standard_conforming_strings=on, default desde 9.1; SQLite idem).
+    O detector legacy tratava `\\'` como escape, criando bypass via
+    `'a\\'; DROP TABLE t; --` (que em SQL standard fecha a string em
+    `'a\\'` e abre multi-statement).
+    """
     stripped = sql.strip()
 
     # Bloquear multi-statement (;) fora de strings
     in_string = False
     quote_char = None
-    for i, c in enumerate(stripped):
-        if c in ("'", '"') and (i == 0 or stripped[i - 1] != "\\"):
-            if not in_string:
+    i = 0
+    n = len(stripped)
+    while i < n:
+        c = stripped[i]
+        if not in_string:
+            if c in ("'", '"'):
                 in_string, quote_char = True, c
-            elif c == quote_char:
+            elif c == ";" and i < n - 1:
+                remaining = stripped[i + 1 :].strip()
+                if remaining and not remaining.startswith("--"):
+                    return "Multi-statement queries bloqueadas por segurança"
+        else:
+            # Dentro de string: doubled-quote escapa, qualquer outra ocorrencia
+            # da mesma quote fecha. Backslash NAO escapa (SQL standard).
+            if c == quote_char:
+                if i + 1 < n and stripped[i + 1] == quote_char:
+                    i += 2  # skip pair, ainda em string
+                    continue
                 in_string = False
-        elif c == ";" and not in_string and i < len(stripped) - 1:
-            remaining = stripped[i + 1 :].strip()
-            if remaining and not remaining.startswith("--"):
-                return "Multi-statement queries bloqueadas por segurança"
+        i += 1
 
     # Bloquear CTE + write (WITH ... DELETE/UPDATE/INSERT)
     if re.match(r"\s*WITH\b", stripped, re.I):

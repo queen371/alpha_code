@@ -160,12 +160,17 @@ async def _run_subagent(
     # Build isolated context for the sub-agent
     system_prompt = _load_subagent_prompt()
 
+    # Paths relativos no contexto do sub-agent (#022): o workspace absoluto
+    # nao precisa estar no prompt — `validate_workspace_args` ja resolve
+    # paths relativos contra o workspace real. Vazar o absoluto no
+    # `task_content` deixava ele acessivel via tool results e logs, e
+    # convidava o modelo a hard-codar paths em vez de manter portabilidade.
+    scratch_rel = scratch_dir.relative_to(workspace_root)
     task_content = (
-        f"[CWD: {workspace_root}]\n"
         f"[AGENT_ID: {agent_id}]\n"
-        f"[SCRATCH_DIR: {scratch_dir}]\n"
+        f"[SCRATCH_DIR: {scratch_rel}]  (relative to workspace)\n"
         "Write any artifacts, logs, or intermediate files to SCRATCH_DIR. "
-        "You may read anything under CWD.\n\n"
+        "You may read anything under the workspace using relative paths.\n\n"
     )
     if context:
         task_content += f"Context: {context}\n\n"

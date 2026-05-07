@@ -27,90 +27,12 @@ VALID_PACKAGE_RE = re.compile(
 
 URL_PREFIXES = ("http://", "https://", "git+", "svn+", "ftp://", "/", "\\")
 
-# Modules that allow shell escape / filesystem damage from executed code.
-# Checked via static analysis before execution (not runtime-bypassable via __import__).
-_BLOCKED_IMPORT_PATTERNS = [
-    r"\bimport\s+os\b",
-    r"\bfrom\s+os\b",
-    r"\bimport\s+subprocess\b",
-    r"\bfrom\s+subprocess\b",
-    r"\bimport\s+shutil\b",
-    r"\bfrom\s+shutil\b",
-    r"\bimport\s+sys\b",
-    r"\bfrom\s+sys\b",
-    r"\bimport\s+importlib\b",
-    r"\bfrom\s+importlib\b",
-    r"\bimport\s+ctypes\b",
-    r"\bfrom\s+ctypes\b",
-    r"\bimport\s+signal\b",
-    r"\bfrom\s+signal\b",
-    r"\bimport\s+pathlib\b",
-    r"\bfrom\s+pathlib\b",
-    r"\bimport\s+socket\b",
-    r"\bfrom\s+socket\b",
-    r"\bimport\s+pty\b",
-    r"\bfrom\s+pty\b",
-    r"\bimport\s+code\b",
-    r"\bfrom\s+code\b",
-    r"\bimport\s+multiprocessing\b",
-    r"\bfrom\s+multiprocessing\b",
-    r"\bimport\s+webbrowser\b",
-    r"\bfrom\s+webbrowser\b",
-    r"\bimport\s+http\b",
-    r"\bfrom\s+http\b",
-    r"\bimport\s+urllib\b",
-    r"\bfrom\s+urllib\b",
-    # Block project dependencies (network exfiltration vectors)
-    r"\bimport\s+httpx\b",
-    r"\bfrom\s+httpx\b",
-    r"\bimport\s+requests\b",
-    r"\bfrom\s+requests\b",
-    r"\bimport\s+aiohttp\b",
-    r"\bfrom\s+aiohttp\b",
-    r"\bimport\s+duckduckgo_search\b",
-    r"\bfrom\s+duckduckgo_search\b",
-    r"\bimport\s+ddgs\b",
-    r"\bfrom\s+ddgs\b",
-    r"\bimport\s+dotenv\b",
-    r"\bfrom\s+dotenv\b",
-    # Deserialization / runtime introspection — pickle.loads e marshal.loads
-    # executam __reduce__ arbitrario; runpy/inspect/gc/platform/dis dao escapes
-    # via globals, frames ou execucao de modulos externos.
-    r"\bimport\s+pickle\b",
-    r"\bfrom\s+pickle\b",
-    r"\bimport\s+marshal\b",
-    r"\bfrom\s+marshal\b",
-    r"\bimport\s+runpy\b",
-    r"\bfrom\s+runpy\b",
-    r"\bimport\s+inspect\b",
-    r"\bfrom\s+inspect\b",
-    r"\bimport\s+gc\b",
-    r"\bfrom\s+gc\b",
-    r"\bimport\s+platform\b",
-    r"\bfrom\s+platform\b",
-    r"\bimport\s+dis\b",
-    r"\bfrom\s+dis\b",
-    r"\b__import__\s*\(",
-    r"\beval\s*\(",
-    r"\bexec\s*\(",
-    r"\bcompile\s*\(",
-    r"\bopen\s*\(.*(w|a|x)",  # block write-mode open()
-    r"\bglobals\s*\(\)",
-    r"\bgetattr\s*\(",  # getattr can bypass any restriction
-    r"\bvars\s*\(",  # vars() exposes namespace
-    r"\bchr\s*\(",  # chr() can build blocked strings dynamically
-    r"\b__loader__\b",  # importlib loader escape
-    r"\b__builtins__\b",  # builtins namespace access
-    r"\b__subclasses__\b",  # class hierarchy traversal
-    r"\bbreakpoint\s*\(",  # debugger escape
-]
-_BLOCKED_IMPORT_RE = re.compile("|".join(_BLOCKED_IMPORT_PATTERNS), re.MULTILINE)
-
 # AST-based blocklists (#D018-PERF + #027/#075/#084 V1.1):
-# Substitui a busca em alternation regex de 35+ ramos com MULTILINE
-# (175K tentativas no pior caso para 5KB de codigo) por um AST walk
-# linear e tambem elimina falsos positivos como `\bopen\s*\(.*(w|a|x)` que
-# casava em `open("read.txt")`.
+# AST walk linear substituiu a busca regex MULTILINE (175K tentativas no
+# pior caso para 5KB de codigo) e tambem elimina falsos positivos como
+# `\bopen\s*\(.*(w|a|x)` que casava em `open("read.txt")`. A regex legacy
+# foi removida — qualquer extensao do blocklist deve adicionar entradas
+# em _BLOCKED_MODULES / _BLOCKED_CALL_NAMES / _BLOCKED_NAME_TOKENS abaixo.
 _BLOCKED_MODULES = frozenset({
     "os", "subprocess", "shutil", "sys", "importlib", "ctypes", "signal",
     "pathlib", "socket", "pty", "code", "multiprocessing", "webbrowser",
