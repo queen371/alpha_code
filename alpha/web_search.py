@@ -32,15 +32,29 @@ MAX_DOWNLOAD_BYTES = 1 * 1024 * 1024  # 1MB per page
 _TIMEOUT = httpx.Timeout(connect=5, read=15, write=5, pool=5)
 
 
+_ddgs_instance = None
+
+
+def _get_ddgs():
+    """Lazy single-instance DDGS — evita re-init a cada query (#D009).
+
+    `DDGS()` cria sessao httpx + carrega rotacao de endpoints. Reusar a
+    instancia entre searches mantem keep-alive e dispenser pool warm.
+    """
+    global _ddgs_instance
+    if _ddgs_instance is None:
+        from ddgs import DDGS
+        _ddgs_instance = DDGS()
+    return _ddgs_instance
+
+
 async def search_duckduckgo(query: str, max_results: int = 5) -> list[dict]:
     """
     Busca no DuckDuckGo via thread executor (lib é síncrona).
     Retorna lista de dicts com keys: title, href, body (snippet).
     """
-    from ddgs import DDGS
-
     def _search():
-        return list(DDGS().text(query, max_results=max_results))
+        return list(_get_ddgs().text(query, max_results=max_results))
 
     try:
         results = await asyncio.wait_for(

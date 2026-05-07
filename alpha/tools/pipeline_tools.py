@@ -14,7 +14,7 @@ from pathlib import Path
 
 from . import ToolDefinition, ToolSafety, register_tool
 from .safe_env import get_safe_env
-from .shell_tools import HARD_BLOCKED
+from .shell_tools import HARD_BLOCKED_RE
 from .workspace import AGENT_WORKSPACE
 
 logger = logging.getLogger(__name__)
@@ -41,10 +41,9 @@ def _validate_pipeline(pipeline: str) -> str | None:
     if _SHELL_EXPANSION_RE.search(pipeline):
         return "Pipeline bloqueado: expansão de variáveis/comandos ($(), ``, ${}) não é permitida"
 
-    # Check hard-blocked patterns on the full string first (pre-compiled)
-    for pattern in HARD_BLOCKED:
-        if pattern.search(pipeline):
-            return "Pipeline bloqueado por segurança (padrão destrutivo detectado)"
+    # Check hard-blocked patterns on the full string (combined regex, #D020)
+    if HARD_BLOCKED_RE.search(pipeline):
+        return "Pipeline bloqueado por segurança (padrão destrutivo detectado)"
 
     # Syntactic check per segment (no allowlist; HARD_BLOCKED already gated)
     segments = re.split(r"\s*(?:\|\||&&|;|\|)\s*", pipeline)

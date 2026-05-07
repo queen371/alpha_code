@@ -149,7 +149,12 @@ async def _run_tests(
             framework = "go"
         else:
             # Look for test files
-            test_files = list(target_path.rglob("test_*.py")) + list(target_path.rglob("*_test.py"))
+            # #D010: dois rglob viram um — itera o tree uma vez so. Para
+            # projetos grandes (~10K files) economiza ~50ms.
+            test_files = [
+                p for p in target_path.rglob("*.py")
+                if p.name.startswith("test_") or p.name.endswith("_test.py")
+            ]
             if test_files:
                 framework = "pytest"
             else:

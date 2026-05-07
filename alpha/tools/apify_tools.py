@@ -15,6 +15,29 @@ APIFY_BASE = "https://api.apify.com/v2"
 _POLL_INTERVAL = 5  # seconds between status checks
 _MAX_WAIT = 300  # max seconds to wait for an Actor run
 
+# #D012: client compartilhado entre _run_actor e _list_actors. Antes
+# cada chamada criava `async with httpx.AsyncClient(...)` — handshake
+# TCP/TLS por call (~150-300ms). Reuso mantem keep-alive ativo.
+_shared_apify_client: httpx.AsyncClient | None = None
+_apify_client_loop: object | None = None
+
+
+def _get_apify_client(timeout: float = 30.0) -> httpx.AsyncClient:
+    """Lazy single-instance client. Recria se loop atual difere do que criou."""
+    global _shared_apify_client, _apify_client_loop
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if (
+        _shared_apify_client is None
+        or _shared_apify_client.is_closed
+        or _apify_client_loop is not loop
+    ):
+        _shared_apify_client = httpx.AsyncClient(timeout=timeout)
+        _apify_client_loop = loop
+    return _shared_apify_client
+
 
 def _get_token() -> str:
     token = os.getenv("APIFY_API_TOKEN", "")
@@ -42,115 +65,115 @@ async def _run_actor(
     except json.JSONDecodeError as e:
         return {"error": f"Invalid JSON in input_data: {e}"}
 
-    # Start the Actor run
-    async with httpx.AsyncClient(timeout=30) as client:
+    # Start the Actor run via shared client (#D012)
+    client = _get_apify_client(timeout=30.0)
+    try:
+        resp = await client.post(
+            f"{APIFY_BASE}/acts/{actor_id}/runs",
+            headers=headers,
+            json=run_input,
+            params={
+                "memory": memory_mbytes,
+                "timeout": timeout_secs,
+                "build": build,
+            },
+        )
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        return {"error": f"Failed to start Actor: {e.response.status_code} — {e.response.text}"}
+    except httpx.RequestError as e:
+        return {"error": f"Request failed: {e}"}
+
+    # #D026: parse defensivo. Apify pode retornar shape diferente em
+    # token expirado, rate limit, ou breaking change da API. Sem isso,
+    # KeyError sobe cru ate o executor.
+    try:
+        payload = resp.json()
+    except ValueError as e:
+        return {"error": f"Apify returned non-JSON response: {e}"}
+    run_data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(run_data, dict):
+        return {"error": f"Apify response shape inesperada: {str(payload)[:200]}"}
+    run_id = run_data.get("id")
+    if not run_id:
+        return {"error": f"Apify response sem run id: {str(payload)[:200]}"}
+    dataset_id = run_data.get("defaultDatasetId")
+
+    logger.info(f"Apify Actor run started: {run_id}")
+
+    # Poll until finished
+    elapsed = 0
+    consecutive_errors = 0
+    last_error: str | None = None
+    while elapsed < _MAX_WAIT:
+        await asyncio.sleep(_POLL_INTERVAL)
+        elapsed += _POLL_INTERVAL
+
         try:
-            resp = await client.post(
-                f"{APIFY_BASE}/acts/{actor_id}/runs",
+            status_resp = await client.get(
+                f"{APIFY_BASE}/actor-runs/{run_id}",
                 headers=headers,
-                json=run_input,
-                params={
-                    "memory": memory_mbytes,
-                    "timeout": timeout_secs,
-                    "build": build,
-                },
             )
-            resp.raise_for_status()
-        except httpx.HTTPStatusError as e:
-            return {"error": f"Failed to start Actor: {e.response.status_code} — {e.response.text}"}
-        except httpx.RequestError as e:
-            return {"error": f"Request failed: {e}"}
-
-        # #D026: parse defensivo. Apify pode retornar shape diferente em
-        # token expirado, rate limit, ou breaking change da API. Sem isso,
-        # KeyError sobe cru ate o executor.
-        try:
-            payload = resp.json()
-        except ValueError as e:
-            return {"error": f"Apify returned non-JSON response: {e}"}
-        run_data = payload.get("data") if isinstance(payload, dict) else None
-        if not isinstance(run_data, dict):
-            return {"error": f"Apify response shape inesperada: {str(payload)[:200]}"}
-        run_id = run_data.get("id")
-        if not run_id:
-            return {"error": f"Apify response sem run id: {str(payload)[:200]}"}
-        dataset_id = run_data.get("defaultDatasetId")
-
-        logger.info(f"Apify Actor run started: {run_id}")
-
-        # Poll until finished
-        elapsed = 0
-        consecutive_errors = 0
-        last_error: str | None = None
-        while elapsed < _MAX_WAIT:
-            await asyncio.sleep(_POLL_INTERVAL)
-            elapsed += _POLL_INTERVAL
-
-            try:
-                status_resp = await client.get(
-                    f"{APIFY_BASE}/actor-runs/{run_id}",
-                    headers=headers,
-                )
-                status_resp.raise_for_status()
-            except httpx.HTTPError as e:
-                # #051/#D012: antes era `continue` silencioso. Loggar +
-                # contar consecutivos para abortar se o endpoint estiver
-                # offline (em vez de pollar inutilmente ate _MAX_WAIT).
-                consecutive_errors += 1
-                last_error = f"{type(e).__name__}: {e}"
-                logger.warning(
-                    f"Apify poll error ({elapsed}s elapsed, "
-                    f"{consecutive_errors} consecutive): {last_error}"
-                )
-                if consecutive_errors >= 5:
-                    return {
-                        "error": (
-                            f"Apify polling failed {consecutive_errors}x consecutive. "
-                            f"Last error: {last_error}"
-                        ),
-                        "run_id": run_id,
-                    }
-                continue
-            consecutive_errors = 0  # sucesso reseta contador
-
-            try:
-                status_payload = status_resp.json()
-                status = status_payload.get("data", {}).get("status")
-            except ValueError:
-                status = None
-            if status is None:
-                # Status JSON malformado — tratar como soft error e retentar
-                consecutive_errors += 1
-                logger.warning(
-                    f"Apify status response malformed ({consecutive_errors}x consecutive)"
-                )
-                continue
-
-            if status == "SUCCEEDED":
-                break
-            elif status in ("FAILED", "ABORTED", "TIMED-OUT"):
-                return {"error": f"Actor run {status}", "run_id": run_id}
-        else:
-            return {"error": f"Timeout waiting for Actor (>{_MAX_WAIT}s)", "run_id": run_id}
-
-        # Fetch dataset items
-        if not dataset_id:
-            return {"status": "SUCCEEDED", "run_id": run_id, "items": []}
-
-        try:
-            items_resp = await client.get(
-                f"{APIFY_BASE}/datasets/{dataset_id}/items",
-                headers=headers,
-                params={"limit": max_items, "format": "json"},
-            )
-            items_resp.raise_for_status()
-            items = items_resp.json()
+            status_resp.raise_for_status()
         except httpx.HTTPError as e:
-            return {"error": f"Failed to fetch results: {e}", "run_id": run_id}
-        except ValueError as e:
-            return {"error": f"Apify items endpoint returned non-JSON: {e}", "run_id": run_id}
-        if not isinstance(items, list):
-            items = []
+            # #051/#D012: antes era `continue` silencioso. Loggar +
+            # contar consecutivos para abortar se o endpoint estiver
+            # offline (em vez de pollar inutilmente ate _MAX_WAIT).
+            consecutive_errors += 1
+            last_error = f"{type(e).__name__}: {e}"
+            logger.warning(
+                f"Apify poll error ({elapsed}s elapsed, "
+                f"{consecutive_errors} consecutive): {last_error}"
+            )
+            if consecutive_errors >= 5:
+                return {
+                    "error": (
+                        f"Apify polling failed {consecutive_errors}x consecutive. "
+                        f"Last error: {last_error}"
+                    ),
+                    "run_id": run_id,
+                }
+            continue
+        consecutive_errors = 0  # sucesso reseta contador
+
+        try:
+            status_payload = status_resp.json()
+            status = status_payload.get("data", {}).get("status")
+        except ValueError:
+            status = None
+        if status is None:
+            # Status JSON malformado — tratar como soft error e retentar
+            consecutive_errors += 1
+            logger.warning(
+                f"Apify status response malformed ({consecutive_errors}x consecutive)"
+            )
+            continue
+
+        if status == "SUCCEEDED":
+            break
+        elif status in ("FAILED", "ABORTED", "TIMED-OUT"):
+            return {"error": f"Actor run {status}", "run_id": run_id}
+    else:
+        return {"error": f"Timeout waiting for Actor (>{_MAX_WAIT}s)", "run_id": run_id}
+
+    # Fetch dataset items
+    if not dataset_id:
+        return {"status": "SUCCEEDED", "run_id": run_id, "items": []}
+
+    try:
+        items_resp = await client.get(
+            f"{APIFY_BASE}/datasets/{dataset_id}/items",
+            headers=headers,
+            params={"limit": max_items, "format": "json"},
+        )
+        items_resp.raise_for_status()
+        items = items_resp.json()
+    except httpx.HTTPError as e:
+        return {"error": f"Failed to fetch results: {e}", "run_id": run_id}
+    except ValueError as e:
+        return {"error": f"Apify items endpoint returned non-JSON: {e}", "run_id": run_id}
+    if not isinstance(items, list):
+        items = []
 
     return {
         "status": "SUCCEEDED",
@@ -173,33 +196,33 @@ async def _list_actors(
     if search:
         params["search"] = search
 
-    async with httpx.AsyncClient(timeout=15) as client:
-        try:
-            resp = await client.get(
-                f"{APIFY_BASE}/store",
-                headers=headers,
-                params=params,
-            )
-            resp.raise_for_status()
-        except httpx.HTTPError as e:
-            return {"error": f"Failed to list actors: {e}"}
+    client = _get_apify_client(timeout=15.0)
+    try:
+        resp = await client.get(
+            f"{APIFY_BASE}/store",
+            headers=headers,
+            params=params,
+        )
+        resp.raise_for_status()
+    except httpx.HTTPError as e:
+        return {"error": f"Failed to list actors: {e}"}
 
-        try:
-            payload = resp.json()
-        except ValueError as e:
-            return {"error": f"Apify returned non-JSON: {e}"}
-        data = payload.get("data") if isinstance(payload, dict) else {}
-        if not isinstance(data, dict):
-            data = {}
-        actors = [
-            {
-                "id": a.get("username", "") + "/" + a.get("name", ""),
-                "title": a.get("title", ""),
-                "description": a.get("description", "")[:200],
-                "runs": a.get("stats", {}).get("totalRuns", 0),
-            }
-            for a in data.get("items", [])
-        ]
+    try:
+        payload = resp.json()
+    except ValueError as e:
+        return {"error": f"Apify returned non-JSON: {e}"}
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    if not isinstance(data, dict):
+        data = {}
+    actors = [
+        {
+            "id": a.get("username", "") + "/" + a.get("name", ""),
+            "title": a.get("title", ""),
+            "description": a.get("description", "")[:200],
+            "runs": a.get("stats", {}).get("totalRuns", 0),
+        }
+        for a in data.get("items", [])
+    ]
 
     return {"total": len(actors), "actors": actors}
 

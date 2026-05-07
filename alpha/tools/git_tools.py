@@ -8,12 +8,19 @@ SECURITY: Only operates within AGENT_WORKSPACE. Destructive operations
 
 import asyncio
 import logging
+import re
 import shlex
 from pathlib import Path
 
 from . import ToolDefinition, ToolSafety, register_tool
 from .safe_env import get_safe_env
 from .workspace import AGENT_WORKSPACE
+
+# #D006: pre-compilada no module level. Antes era recompilada em cada
+# `_sanitize_git_args` (3-5 chamadas por tool call de log/show/diff/push/etc).
+_DANGEROUS_GIT_FMT = re.compile(
+    r"%\((if|then|else|end|contents:signature|trailers)\)", re.IGNORECASE
+)
 
 logger = logging.getLogger(__name__)
 
@@ -143,22 +150,19 @@ def _sanitize_git_args(action: str, args: str) -> tuple[list[str], str | None]:
         if part.startswith("+") and action == "push":
             return [], "Force push via +refspec bloqueado"
 
-    # Block dangerous format string expansions (can execute hooks)
-    import re as _re
-
-    _DANGEROUS_FMT = _re.compile(
-        r"%\((if|then|else|end|contents:signature|trailers)\)", _re.IGNORECASE
-    )
+    # Block dangerous format string expansions (can execute hooks).
+    # Regex pre-compilada em module level (#D006) — evitar recompilacao a
+    # cada chamada de _sanitize_git_args.
     for j, part in enumerate(parts):
         # Check --format=VALUE and --pretty=VALUE (with =)
         if part.startswith("--format=") or part.startswith("--pretty="):
             fmt_value = part.split("=", 1)[1]
-            if _DANGEROUS_FMT.search(fmt_value):
+            if _DANGEROUS_GIT_FMT.search(fmt_value):
                 return [], f"Format string com expansões perigosas bloqueada: '{part[:50]}'"
         # Check --format VALUE and --pretty VALUE (space-separated)
         elif part in ("--format", "--pretty") and j + 1 < len(parts):
             next_val = parts[j + 1]
-            if _DANGEROUS_FMT.search(next_val):
+            if _DANGEROUS_GIT_FMT.search(next_val):
                 return [], f"Format string com expansões perigosas bloqueada: '{next_val[:50]}'"
 
     # Se a action tem whitelist, validar flags

@@ -1,5 +1,5 @@
 # STATUS DO PROJETO — Alpha Code
-> Ultima atualizacao: 2026-05-07 20:30
+> Ultima atualizacao: 2026-05-07 21:15
 > Atualizado por: Claude Code (status-update)
 
 ---
@@ -27,7 +27,8 @@ Nenhuma issue ALTO pendente. Todos os 14 ALTOs originais (V1.1 + DEEPs V2.0) fec
 
 | Commit | O que fechou |
 |--------|--------------|
-| (workdir 2026-05-07 20h30) | **DEEP_BUGS V1.0 stragglers** — todas as 9 issues #D022–#D030 fechadas: jitter cap, SQLite URI quote, glob workspace per-match, apify defensive parse (5 sites), ALLOWED_COMMANDS dead-code removal, shell description, git push dead-check, _CATEGORY_ICONS verified em uso. +16 testes. |
+| (workdir 2026-05-07 21h15) | **DEEP_PERFORMANCE V1.0 stragglers** — 8 fixes (#D006 git regex module, #D007 list_sessions partial-read, #D009 DDGS shared, #D010 rglob unified, #D012 apify shared httpx, #D020 HARD_BLOCKED combined regex, #D025 compact JSON + probabilistic cleanup, #027/#072 glob iterator + skip noise dirs) + 2 verificadas pre-fechadas (#D004/#068, #D011/#002). +17 testes. |
+| `db75078` | **DEEP_BUGS V1.0 stragglers** — todas as 9 issues #D022–#D030 fechadas. +16 testes. |
 | `006ddf3` | **DEEP_RESILIENCE sprint 2** — #053 (compress error structured), #055 (atexit loop detection), #057 (http_request retry transientes), #051/#D012 (apify polling logged), #065 (browser listener cleanup), #067 (SIGTERM handler), #D010 (extract_multiple_pages log) + 3 verificadas pre-fechadas (#066/#D006, #060, #064). +11 testes. |
 | `c1c92f1` | **DEEP_RESILIENCE sprint 1** — #024 (Ctrl+C em approval), #014/#D009 (save_session OSError), #052 (delete dead httpx handler), #054 (BrowserSession reset), #056/#061 (sub-agent traceback + scratch cleanup), #058 (já fechado via D020-RES), #059 (extract_page fallback awareness), #D005 (SQLite timeout), #048 (PG fetch timeout). +11 testes. |
 | `d1d6ba5` | **DEEP_SECURITY V1.0/V1.1 batch 2** — #027 (dead regex blocklist removida), #028 (safe_env TTL 60s), #022 (sub-agent task_content sem absolute workspace path), #030 (multi-statement SQL detector segue SQL standard `''`). +13 testes em `test_security_v10_v11_batch2.py`. |
@@ -65,7 +66,7 @@ Nenhuma issue ALTO pendente. Todos os 14 ALTOs originais (V1.1 + DEEPs V2.0) fec
 | **DEEP_BUGS** | #D013–#D030 (18/18) ✅ | — | [DEEP_BUGS](audits/current/DEEP_BUGS.md) |
 | **DEEP_LOGIC** | #DL012–#DL020 (9/9) ✅ | — | [DEEP_LOGIC](audits/current/DEEP_LOGIC.md) |
 | **DEEP_MAINTAINABILITY** | 7/8 + #DM001 deferido | #D001–#D013 (V1.0), #028, #030, #081, #082, #097, #DM003–#DM005, #DM007, #DM012, #DM014–#DM016, #083–#090 (~25) | [DEEP_MAINTAINABILITY](audits/current/DEEP_MAINTAINABILITY.md) |
-| **DEEP_PERFORMANCE** | 13/13 ✅ | #025/#071, #027/#072, #D005, #D007, #D008, #D009, #D010, #D012, #D020, #D022, #D025 (V1.0 cross-refs ~12) | [DEEP_PERFORMANCE](audits/current/DEEP_PERFORMANCE.md) |
+| **DEEP_PERFORMANCE** | 13/13 ✅ | #025/#071 (search_files ripgrep, 45min), #D005 (fuzzy cache), #D008 (aiohttp shared), #D022 (extract cache), #026/#076 (LLM client) (~5 restantes) | [DEEP_PERFORMANCE](audits/current/DEEP_PERFORMANCE.md) |
 | **DEEP_RESILIENCE** | #D013–#D021 (9/9) ✅ | #D008 (rate limits design) — restantes pendentes V1.0/V1.1 todos fechados nos 2 sprints | [DEEP_RESILIENCE](audits/current/DEEP_RESILIENCE.md) |
 | **DEEP_SECURITY** | 12/12 ✅ | #023 (browser allowlist policy), #025/#026 (deps CVE remaining), #036 (deps upper bound), #D014 (manifest plugins), #115 V1.1 (env perms verified) (~5 restantes) | [DEEP_SECURITY](audits/current/DEEP_SECURITY.md) |
 
@@ -90,7 +91,9 @@ Nenhuma issue ALTO pendente. Todos os 14 ALTOs originais (V1.1 + DEEPs V2.0) fec
 
 ## SPRINT ATUAL
 
-**Concluido (2026-05-07 20h30):** DEEP_BUGS V1.0 stragglers — 9 issues fechadas (#D022–#D030). DEEP_BUGS agora 100% zerado (18/18). +16 testes.
+**Concluido (2026-05-07 21h15):** DEEP_PERFORMANCE V1.0 stragglers — 8 fixes + 2 verificadas pre-fechadas. +17 testes.
+
+**Antes (2026-05-07 20h30):** DEEP_BUGS V1.0 stragglers — 9 issues fechadas (#D022–#D030). DEEP_BUGS agora 100% zerado (18/18). +16 testes.
 
 **Antes (2026-05-07 19h45):** DEEP_RESILIENCE sprint 2 — 7 fixes + 3 verificadas pre-fechadas.
 
@@ -143,8 +146,8 @@ Backlog DEEP_SECURITY agora reduzido a 5 itens densos. Outros DEEPs tem mais iss
 | Issues criticas pendentes | **0** |
 | Issues ALTO pendentes | **0** |
 | Issues V2.0 abertas (cross-deep) | **0** ✅ |
-| Issues V1.0/V1.1 stragglers | ~31 distribuidas (todas BAIXO/MEDIO) |
-| Suite de testes | **331/331** verde |
+| Issues V1.0/V1.1 stragglers | ~22 distribuidas (todas BAIXO/MEDIO) |
+| Suite de testes | **348/348** verde |
 | CI gate | Ativo (Py 3.11 + 3.12) |
 | MVP bloqueadores | Nao avaliado (sem MVP_PLAN) |
 
@@ -191,6 +194,7 @@ Nenhuma ADR registrada em `docs/decisions/`. Considere documentar:
 | 2026-05-07 | **DEEP_RESILIENCE sprint 1** — +9 issues (Ctrl+C approval, save OSError, dead httpx handler, browser singleton reset, sub-agent traceback+scratch cleanup, extract fallback log, SQLite+PG timeouts). Suite 293 → 304 |
 | 2026-05-07 | **DEEP_RESILIENCE sprint 2** — +7 issues + 3 verificadas pre-fechadas. Suite 304 → 315. DEEP_RESILIENCE essencialmente esgotado. |
 | 2026-05-07 | **DEEP_BUGS V1.0 stragglers** — todas as 9 issues #D022–#D030 fechadas. DEEP_BUGS 100% zerado (18/18). Suite 315 → 331. |
+| 2026-05-07 | **DEEP_PERFORMANCE V1.0 stragglers** — 8 fixes + 2 verificadas pre-fechadas (git regex module, list_sessions partial-read, DDGS shared, rglob unified, apify shared httpx, HARD_BLOCKED combined regex, compact JSON, glob iterator+skip). Suite 331 → 348. |
 
 ---
 

@@ -18,63 +18,77 @@ from .workspace import AGENT_WORKSPACE
 # leitores/auditores que assumiam allowlist enforcement.
 
 # Catastrophic / system-destructive patterns — blocked regardless of approval.
-HARD_BLOCKED = [
+# Lista mantida individualmente para facilitar diff/review; a regex combinada
+# logo abaixo (#D020) e o que `_validate_command` consulta em runtime.
+_HARD_BLOCKED_PATTERNS = [
     # Recursive file deletion
-    re.compile(r"\brm\s+(?:-\S*[rR]\S*|--recursive\b)", re.IGNORECASE),
+    r"\brm\s+(?:-\S*[rR]\S*|--recursive\b)",
     # Filesystem formatting / wiping
-    re.compile(r"\bmkfs(?:\.[a-z0-9]+)?\b", re.IGNORECASE),
-    re.compile(r"\bmke2fs\b", re.IGNORECASE),
-    re.compile(r"\bwipefs\b", re.IGNORECASE),
-    re.compile(r"\bshred\b", re.IGNORECASE),
+    r"\bmkfs(?:\.[a-z0-9]+)?\b",
+    r"\bmke2fs\b",
+    r"\bwipefs\b",
+    r"\bshred\b",
     # Raw disk writes
-    re.compile(r"\bdd\s+[^\n]*of=/dev/(sd|nvme|hd|xvd|vd|mmcblk)", re.IGNORECASE),
-    re.compile(r">\s*/dev/(sd|nvme|hd|xvd|vd|mmcblk)", re.IGNORECASE),
-    # Fork bomb
-    re.compile(r":\(\)\s*\{\s*:\|:\s*&\s*\}\s*;?\s*:"),
+    r"\bdd\s+[^\n]*of=/dev/(sd|nvme|hd|xvd|vd|mmcblk)",
+    r">\s*/dev/(sd|nvme|hd|xvd|vd|mmcblk)",
+    # Fork bomb (case-sensitive — `:` literal)
+    r":\(\)\s*\{\s*:\|:\s*&\s*\}\s*;?\s*:",
     # su (sudo is handled via pattern matches below, not blanket-blocked)
-    re.compile(r"(^|[;&|]\s*)su(\s|$)", re.IGNORECASE),
+    r"(^|[;&|]\s*)su(\s|$)",
     # Power / halt / reboot
-    re.compile(r"\b(shutdown|reboot|halt|poweroff)\b", re.IGNORECASE),
-    re.compile(r"\binit\s+[0-6]\b", re.IGNORECASE),
-    re.compile(r"\btelinit\b", re.IGNORECASE),
-    re.compile(r"\bsystemctl\s+(poweroff|reboot|halt|kexec|rescue|emergency|suspend|hibernate)\b", re.IGNORECASE),
+    r"\b(shutdown|reboot|halt|poweroff)\b",
+    r"\binit\s+[0-6]\b",
+    r"\btelinit\b",
+    r"\bsystemctl\s+(poweroff|reboot|halt|kexec|rescue|emergency|suspend|hibernate)\b",
     # Writes to critical system files
-    re.compile(r">\s*/etc/(passwd|shadow|sudoers|fstab|hosts(\s|$))", re.IGNORECASE),
-    re.compile(r"\b(tee|dd)\s+[^|;]*\s/etc/(passwd|shadow|sudoers|fstab)", re.IGNORECASE),
-    re.compile(r"\bvisudo\b", re.IGNORECASE),
+    r">\s*/etc/(passwd|shadow|sudoers|fstab|hosts(\s|$))",
+    r"\b(tee|dd)\s+[^|;]*\s/etc/(passwd|shadow|sudoers|fstab)",
+    r"\bvisudo\b",
     # chmod on critical system dirs
-    re.compile(r"\bchmod\s+\S+\s+/(etc|usr|boot|bin|sbin|lib|lib64|sys|proc)(\s|/|$)", re.IGNORECASE),
-    re.compile(r"\bchmod\s+-R\s+\S+\s+/(\s|$)", re.IGNORECASE),
+    r"\bchmod\s+\S+\s+/(etc|usr|boot|bin|sbin|lib|lib64|sys|proc)(\s|/|$)",
+    r"\bchmod\s+-R\s+\S+\s+/(\s|$)",
     # chown to root on system paths
-    re.compile(r"\bchown\s+\S*root\S*\s+/(etc|usr|boot|bin|sbin|lib)", re.IGNORECASE),
+    r"\bchown\s+\S*root\S*\s+/(etc|usr|boot|bin|sbin|lib)",
     # Kernel module manipulation
-    re.compile(r"\b(insmod|rmmod)\b", re.IGNORECASE),
-    re.compile(r"\bmodprobe\s+-r\b", re.IGNORECASE),
+    r"\b(insmod|rmmod)\b",
+    r"\bmodprobe\s+-r\b",
     # LVM / crypto destruction
-    re.compile(r"\b(lvremove|vgremove|pvremove)\b", re.IGNORECASE),
-    re.compile(r"\bcryptsetup\s+(erase|luksErase|wipeKey|luksRemoveKey)\b", re.IGNORECASE),
+    r"\b(lvremove|vgremove|pvremove)\b",
+    r"\bcryptsetup\s+(erase|luksErase|wipeKey|luksRemoveKey)\b",
     # User/group destruction
-    re.compile(r"\b(userdel|groupdel)\b", re.IGNORECASE),
+    r"\b(userdel|groupdel)\b",
     # Interactive disk partitioning on real devices
-    re.compile(r"\b(fdisk|gdisk|cfdisk|sfdisk|parted)\s+/dev/", re.IGNORECASE),
+    r"\b(fdisk|gdisk|cfdisk|sfdisk|parted)\s+/dev/",
     # Firewall flush/reset
-    re.compile(r"\b(iptables|ip6tables|nft)\b\s+(?:.*\s+)?(?:-F|-X|--flush)(?:\s|$)", re.IGNORECASE),
-    re.compile(r"\bufw\s+(reset|disable)\b", re.IGNORECASE),
+    r"\b(iptables|ip6tables|nft)\b\s+(?:.*\s+)?(?:-F|-X|--flush)(?:\s|$)",
+    r"\bufw\s+(reset|disable)\b",
 ]
+
+# #D020: 27 regex viraram uma alternation unica. Antes `_validate_command`
+# fazia 27 chamadas `pattern.search(command)` (~3-5ms total por call,
+# cumulativo em sessoes ativas com varios shell calls). Agora 1 chamada.
+HARD_BLOCKED_RE = re.compile(
+    "|".join(f"(?:{p})" for p in _HARD_BLOCKED_PATTERNS), re.IGNORECASE
+)
+
+# Backwards compat: codigo externo que importava `HARD_BLOCKED` (e.g.
+# pipeline_tools) ainda funciona — exposto como wrapper iteravel da
+# regex combinada para nao quebrar contratos. Cada elemento ainda e
+# uma re.Pattern com `.search()`.
+HARD_BLOCKED = [re.compile(p, re.IGNORECASE) for p in _HARD_BLOCKED_PATTERNS]
 
 
 def _validate_command(command: str) -> str | None:
     """Return error message if command is destructive, None otherwise.
 
-    Denylist model: only catastrophic patterns (HARD_BLOCKED) are rejected.
+    Denylist model: only catastrophic patterns (HARD_BLOCKED_RE) are rejected.
     Any other command runs. Approval layer decides user prompting.
     """
     if "\n" in command or "\r" in command:
         return "Comando bloqueado: caracteres de newline não são permitidos"
 
-    for pattern in HARD_BLOCKED:
-        if pattern.search(command):
-            return "Comando bloqueado por segurança (padrão destrutivo detectado)"
+    if HARD_BLOCKED_RE.search(command):
+        return "Comando bloqueado por segurança (padrão destrutivo detectado)"
 
     # Syntactic sanity check per pipe segment
     segments = command.split("|") if "|" in command else [command]

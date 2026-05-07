@@ -179,9 +179,22 @@ async def _glob_files(pattern: str, path: str = ".") -> dict:
     if not p.exists():
         return {"error": f"Caminho não encontrado: {path}"}
 
+    # #027/#072: era `sorted(p.glob(pattern))` — materializava a lista
+    # inteira antes de cortar a 200. Em monorepos com .git/node_modules
+    # incluido, isso pode produzir 100K+ entradas. Itera o generator,
+    # acumula 200, ordena no final.
+    _SKIP_DIRS = {".git", "node_modules", ".venv", "__pycache__", ".mypy_cache",
+                  ".pytest_cache", ".ruff_cache", "dist", "build"}
     matches = []
     skipped_outside = 0
-    for match in sorted(p.glob(pattern)):
+    for match in p.glob(pattern):
+        # Skip subdirectories de noise para nao ler 100K entries em monorepos
+        try:
+            rel = match.relative_to(p)
+            if any(part in _SKIP_DIRS for part in rel.parts):
+                continue
+        except ValueError:
+            pass
         # #D025: workspace dentro do glob — se p contem symlink que aponta
         # para fora, glob seguiria e listaria filenames externos. read_file
         # depois bloquearia, mas o filename ja vazou estrutura externa.
@@ -199,6 +212,9 @@ async def _glob_files(pattern: str, path: str = ".") -> dict:
         matches.append(info)
         if len(matches) >= 200:
             break
+
+    # Sort apenas o subset de 200 (ou menos), nao a coleta inteira.
+    matches.sort(key=lambda info: info["path"])
 
     result = {
         "pattern": pattern,
