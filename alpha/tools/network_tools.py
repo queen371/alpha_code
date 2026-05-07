@@ -8,6 +8,7 @@ Request size and timeout are limited. No credential forwarding.
 
 import asyncio
 import logging
+import random
 import ssl as _ssl
 from urllib.parse import urlparse, urlunparse
 
@@ -22,6 +23,14 @@ logger = logging.getLogger(__name__)
 
 _MAX_RESPONSE_SIZE = 1_000_000  # 1MB
 _ALLOWED_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
+
+# Retry config (#057): metodos seguros (GET/HEAD/OPTIONS) podem retentar
+# erros transientes (connection reset, DNS hiccup) sem risco de duplicar
+# efeito. Metodos de escrita (POST/PUT/PATCH/DELETE) NUNCA retentam —
+# duplicar pagamentos / criacoes seria pior do que falhar uma vez.
+_RETRY_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+_HTTP_MAX_RETRIES = 2  # ate 3 tentativas no total
+_HTTP_INITIAL_BACKOFF = 0.5
 
 
 def _rewrite_url_with_ip(parsed, resolved_ip: str) -> str:
@@ -188,6 +197,14 @@ async def _http_request(
         return await _http_request_urllib(url, method, headers, body, timeout)
     except TimeoutError:
         return {"error": f"Request excedeu timeout de {timeout}s", "timeout": True}
+    except (OSError, ConnectionError) as e:
+        # #057: erros de I/O transientes (DNS hiccup, conexao resetada)
+        # em metodos seguros podem ser retentados. O caller pega `error` +
+        # `transient: True` se quiser retry manual, ou usa _http_request_retry.
+        return {
+            "error": f"Erro de I/O na requisição: {type(e).__name__}: {e}",
+            "transient": True,
+        }
     except Exception as e:
         return {"error": f"Erro na requisição: {e}"}
 
@@ -258,6 +275,43 @@ async def _http_request_urllib(
         return {"error": str(e)}
 
 
+async def _http_request_with_retry(
+    url: str,
+    method: str = "GET",
+    headers: dict = None,
+    body: str = None,
+    timeout: int | None = None,
+) -> dict:
+    """Wrapper do `_http_request` com retry de transientes em metodos seguros.
+
+    Metodos de escrita (POST/PUT/PATCH/DELETE) NUNCA retentam (#057): se
+    o request criou recurso parcialmente antes do erro, retentar duplica.
+    GET/HEAD/OPTIONS sao idempotentes — retentam erros marcados como
+    `transient` por `_http_request`.
+    """
+    method_upper = (method or "GET").upper()
+    if method_upper not in _RETRY_SAFE_METHODS:
+        return await _http_request(url, method, headers, body, timeout)
+
+    last_result: dict = {}
+    for attempt in range(_HTTP_MAX_RETRIES + 1):
+        result = await _http_request(url, method, headers, body, timeout)
+        if not result.get("transient"):
+            return result
+        last_result = result
+        if attempt < _HTTP_MAX_RETRIES:
+            backoff = _HTTP_INITIAL_BACKOFF * (2 ** attempt) * (1 + random.random() * 0.3)
+            logger.warning(
+                f"http_request transient error on {url} "
+                f"(attempt {attempt + 1}/{_HTTP_MAX_RETRIES + 1}), "
+                f"retrying in {backoff:.2f}s"
+            )
+            await asyncio.sleep(backoff)
+    # Esgotou retries — retorna o ultimo erro com a info do retry budget.
+    last_result["retried"] = _HTTP_MAX_RETRIES + 1
+    return last_result
+
+
 register_tool(
     ToolDefinition(
         name="http_request",
@@ -297,6 +351,6 @@ register_tool(
         },
         safety=ToolSafety.DESTRUCTIVE,
         category="network",
-        executor=_http_request,
+        executor=_http_request_with_retry,
     )
 )

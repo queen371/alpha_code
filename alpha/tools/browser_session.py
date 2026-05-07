@@ -105,6 +105,17 @@ class BrowserSession:
 
     async def close(self) -> None:
         async with self._lock:
+            # #065: remover listener `_on_new_page` antes de fechar o
+            # context. Sem isto, mesmo apos browser.close, o callback
+            # mantinha referencia para `self` enquanto Playwright runtime
+            # nao GC'ava o context — ciclos abre/fecha empilhavam listeners.
+            if self.context is not None:
+                try:
+                    self.context.remove_listener("page", self._on_new_page)
+                except Exception:
+                    # Playwright pode levantar se o context ja foi descartado
+                    # — nao impede o close.
+                    pass
             if self.browser:
                 try:
                     await self.browser.close()

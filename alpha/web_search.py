@@ -289,12 +289,25 @@ async def extract_multiple_pages(
     tasks = [_fetch_one(url) for url in urls]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
+    # #D010: log finalizado com contagem por outcome para diagnostico.
+    # Antes era silencioso — caller via 0 paginas e nao sabia se foi
+    # falha de rede, parse, ou URLs invalidas.
     url_to_text: dict[str, str] = {}
-    for result in results:
+    failed = 0
+    empty = 0
+    for url, result in zip(urls, results):
         if isinstance(result, Exception):
+            failed += 1
+            logger.warning(f"extract_multiple_pages failed for {url}: {result}")
             continue
-        url, text = result
+        _, text = result
         if text:
             url_to_text[url] = text
+        else:
+            empty += 1
+    logger.info(
+        f"extract_multiple_pages: {len(url_to_text)}/{len(urls)} ok, "
+        f"{failed} failed, {empty} empty"
+    )
 
     return url_to_text

@@ -283,8 +283,19 @@ async def run_agent(
                         "before": tokens_before,
                         "after": tokens_after,
                     }
-            except Exception as e:
-                logger.warning(f"Context compression failed: {e} — continuing")
+            except (TimeoutError, asyncio.TimeoutError) as e:
+                # Compression chamada um LLM que estourou. Continua com
+                # contexto inflado — o hard truncate fallback (#062) cobre
+                # o caso onde isso vira loop.
+                logger.warning(
+                    f"Context compression timeout: {e} — continuing without compression"
+                )
+            except Exception:
+                # #053: bugs reais em context.py virariam silenciosos com
+                # `except Exception as e: logger.warning(...)`. exc_info=True
+                # preserva o frame onde o bug aconteceu para diagnostico,
+                # sem derrubar o agent loop.
+                logger.exception("Context compression failed unexpectedly — continuing")
 
         # ── Stream LLM call (with one overflow retry) ──
         final_event = None

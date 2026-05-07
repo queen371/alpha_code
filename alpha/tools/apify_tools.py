@@ -69,6 +69,8 @@ async def _run_actor(
 
         # Poll until finished
         elapsed = 0
+        consecutive_errors = 0
+        last_error: str | None = None
         while elapsed < _MAX_WAIT:
             await asyncio.sleep(_POLL_INTERVAL)
             elapsed += _POLL_INTERVAL
@@ -79,8 +81,26 @@ async def _run_actor(
                     headers=headers,
                 )
                 status_resp.raise_for_status()
-            except httpx.HTTPError:
+            except httpx.HTTPError as e:
+                # #051/#D012: antes era `continue` silencioso. Loggar +
+                # contar consecutivos para abortar se o endpoint estiver
+                # offline (em vez de pollar inutilmente ate _MAX_WAIT).
+                consecutive_errors += 1
+                last_error = f"{type(e).__name__}: {e}"
+                logger.warning(
+                    f"Apify poll error ({elapsed}s elapsed, "
+                    f"{consecutive_errors} consecutive): {last_error}"
+                )
+                if consecutive_errors >= 5:
+                    return {
+                        "error": (
+                            f"Apify polling failed {consecutive_errors}x consecutive. "
+                            f"Last error: {last_error}"
+                        ),
+                        "run_id": run_id,
+                    }
                 continue
+            consecutive_errors = 0  # sucesso reseta contador
 
             status = status_resp.json()["data"]["status"]
 

@@ -1,5 +1,5 @@
 # STATUS DO PROJETO — Alpha Code
-> Ultima atualizacao: 2026-05-07 19:00
+> Ultima atualizacao: 2026-05-07 19:45
 > Atualizado por: Claude Code (status-update)
 
 ---
@@ -27,7 +27,8 @@ Nenhuma issue ALTO pendente. Todos os 14 ALTOs originais (V1.1 + DEEPs V2.0) fec
 
 | Commit | O que fechou |
 |--------|--------------|
-| (workdir 2026-05-07 19h) | **DEEP_RESILIENCE V1.0/V1.1 sprint 1** — #024 (Ctrl+C em approval), #014/#D009 (save_session OSError), #052 (delete dead httpx handler), #054 (BrowserSession reset), #056/#061 (sub-agent traceback + scratch cleanup), #058 (já fechado via D020-RES), #059 (extract_page fallback awareness), #D005 (SQLite timeout), #048 (PG fetch timeout). +11 testes. |
+| (workdir 2026-05-07 19h45) | **DEEP_RESILIENCE sprint 2** — #053 (compress error structured), #055 (atexit loop detection), #057 (http_request retry transientes), #051/#D012 (apify polling logged), #065 (browser listener cleanup), #067 (SIGTERM handler), #D010 (extract_multiple_pages log) + 3 verificadas pre-fechadas (#066/#D006, #060, #064). +11 testes. |
+| `c1c92f1` | **DEEP_RESILIENCE sprint 1** — #024 (Ctrl+C em approval), #014/#D009 (save_session OSError), #052 (delete dead httpx handler), #054 (BrowserSession reset), #056/#061 (sub-agent traceback + scratch cleanup), #058 (já fechado via D020-RES), #059 (extract_page fallback awareness), #D005 (SQLite timeout), #048 (PG fetch timeout). +11 testes. |
 | `d1d6ba5` | **DEEP_SECURITY V1.0/V1.1 batch 2** — #027 (dead regex blocklist removida), #028 (safe_env TTL 60s), #022 (sub-agent task_content sem absolute workspace path), #030 (multi-statement SQL detector segue SQL standard `''`). +13 testes em `test_security_v10_v11_batch2.py`. |
 | `99637f4` | **DEEP_SECURITY V1.0/V1.1 batch 1** — #D012 + #D015 (sanitize Bearer/DSN via novo `_security_log.py`), #029 (html.unescape), #032 (block userinfo URL), #033 (strip control chars subagent.md), #034 (apify_run_actor → DESTRUCTIVE), #035 (wizard reject newline). +23 testes em `test_security_v10_v11_fixes.py`. |
 | `82f1291` | **Ultimos 7 V2.0 stragglers** — DEEP_LOGIC #DL016, DEEP_RESILIENCE #D020/#D021, DEEP_SECURITY #D107/#D110/#D111/#D112 (#D107 verificado como ja fechado via #D014-BUGS). 13 testes em `test_v2_stragglers.py`. |
@@ -64,7 +65,7 @@ Nenhuma issue ALTO pendente. Todos os 14 ALTOs originais (V1.1 + DEEPs V2.0) fec
 | **DEEP_LOGIC** | #DL012–#DL020 (9/9) ✅ | — | [DEEP_LOGIC](audits/current/DEEP_LOGIC.md) |
 | **DEEP_MAINTAINABILITY** | 7/8 + #DM001 deferido | #D001–#D013 (V1.0), #028, #030, #081, #082, #097, #DM003–#DM005, #DM007, #DM012, #DM014–#DM016, #083–#090 (~25) | [DEEP_MAINTAINABILITY](audits/current/DEEP_MAINTAINABILITY.md) |
 | **DEEP_PERFORMANCE** | 13/13 ✅ | #025/#071, #027/#072, #D005, #D007, #D008, #D009, #D010, #D012, #D020, #D022, #D025 (V1.0 cross-refs ~12) | [DEEP_PERFORMANCE](audits/current/DEEP_PERFORMANCE.md) |
-| **DEEP_RESILIENCE** | #D013–#D021 (9/9) ✅ | #066/#D006, #053, #055, #057, #060, #051/#D012, #D008, #064, #065, #067, #D010 (~11 restantes) | [DEEP_RESILIENCE](audits/current/DEEP_RESILIENCE.md) |
+| **DEEP_RESILIENCE** | #D013–#D021 (9/9) ✅ | #D008 (rate limits design) — restantes pendentes V1.0/V1.1 todos fechados nos 2 sprints | [DEEP_RESILIENCE](audits/current/DEEP_RESILIENCE.md) |
 | **DEEP_SECURITY** | 12/12 ✅ | #023 (browser allowlist policy), #025/#026 (deps CVE remaining), #036 (deps upper bound), #D014 (manifest plugins), #115 V1.1 (env perms verified) (~5 restantes) | [DEEP_SECURITY](audits/current/DEEP_SECURITY.md) |
 
 > **Todos os V2.0 fechados.** Backlog restante e exclusivamente cross-refs V1.0/V1.1 herdadas que nunca foram fechadas em sprints anteriores (~70 issues distribuidas, todas BAIXO/MEDIO).
@@ -88,7 +89,9 @@ Nenhuma issue ALTO pendente. Todos os 14 ALTOs originais (V1.1 + DEEPs V2.0) fec
 
 ## SPRINT ATUAL
 
-**Concluido (2026-05-07 19h):** DEEP_RESILIENCE batch 1 — 9 issues (#024, #014/#D009, #052, #054, #056, #058 [via D020-RES], #059, #061, #D005, #048). +11 testes.
+**Concluido (2026-05-07 19h45):** DEEP_RESILIENCE sprint 2 — 7 fixes + 3 verificadas pre-fechadas. DEEP_RESILIENCE essencialmente esgotado (so #D008 rate limits resta como design decision).
+
+**Antes (2026-05-07 19h):** DEEP_RESILIENCE sprint 1 — 9 issues. +11 testes.
 
 **Antes (2026-05-07 18h):** DEEP_SECURITY batch 2 — #027, #028, #022, #030.
 
@@ -109,16 +112,8 @@ Backlog DEEP_SECURITY agora reduzido a 5 itens densos. Outros DEEPs tem mais iss
 - [ ] #025/#026 — pytest 9.0.2 CVE remaining (vide D108 closure parcial)
 - [ ] #115 V1.1 — `.env` perms verified post-fix (5min)
 
-### Opcao B — DEEP_RESILIENCE restantes (~11 abertas)
-- [ ] #066/#D006 — messages cresce sem limite (30min)
-- [ ] #053 — compress_context swallow Exception generico (15min)
-- [ ] #055 — atexit cria novo loop em shutdown (10min)
-- [ ] #057 — http_request OSError sem retry (15min)
-- [ ] #060 — _get_shared_client event loop morto (10min)
-- [ ] #065 — listener _on_new_page nao removido (5min)
-- [ ] #067 — sem SIGTERM handler (10min)
-- [ ] #051/#D012 — apify silent HTTP errors (10min)
-- [ ] #D008 — sub-agentes paralelos exaurem rate limits (20min)
+### Opcao B — DEEP_RESILIENCE restantes (apenas #D008)
+- [ ] #D008 — sub-agentes paralelos exaurem rate limits LLM (~30min, requer design de global LLM rate limiter)
 
 ### Opcao C — DEEP_BUGS V1.0 stragglers (~9, baixo risco)
 - [ ] #D022–#D030 — error_paths, jitter, SQLite URI, glob workspace, etc
@@ -146,8 +141,8 @@ Backlog DEEP_SECURITY agora reduzido a 5 itens densos. Outros DEEPs tem mais iss
 | Issues criticas pendentes | **0** |
 | Issues ALTO pendentes | **0** |
 | Issues V2.0 abertas (cross-deep) | **0** ✅ |
-| Issues V1.0/V1.1 stragglers | ~50 distribuidas (todas BAIXO/MEDIO) |
-| Suite de testes | **304/304** verde |
+| Issues V1.0/V1.1 stragglers | ~40 distribuidas (todas BAIXO/MEDIO) |
+| Suite de testes | **315/315** verde |
 | CI gate | Ativo (Py 3.11 + 3.12) |
 | MVP bloqueadores | Nao avaliado (sem MVP_PLAN) |
 
@@ -192,6 +187,7 @@ Nenhuma ADR registrada em `docs/decisions/`. Considere documentar:
 | 2026-05-07 | **DEEP_SECURITY V1.0/V1.1 sprint** — 7 issues fechadas via `_security_log.py` + quick wins. Suite 257 → 280 |
 | 2026-05-07 | **DEEP_SECURITY batch 2** — +4 issues (#027 dead code, #028 TTL, #022 path privacy, #030 SQL standard). Suite 280 → 293 |
 | 2026-05-07 | **DEEP_RESILIENCE sprint 1** — +9 issues (Ctrl+C approval, save OSError, dead httpx handler, browser singleton reset, sub-agent traceback+scratch cleanup, extract fallback log, SQLite+PG timeouts). Suite 293 → 304 |
+| 2026-05-07 | **DEEP_RESILIENCE sprint 2** — +7 issues + 3 verificadas pre-fechadas (compress error structured, atexit loop detection, http retry transientes, apify polling logs, browser listener cleanup, SIGTERM, extract log). Suite 304 → 315. DEEP_RESILIENCE essencialmente esgotado. |
 
 ---
 

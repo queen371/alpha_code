@@ -145,13 +145,39 @@ def _approval_callback(tool_name: str, args: dict) -> bool:
 
 
 def _shutdown_browser_session():
-    """atexit hook: close any persistent browser session."""
+    """atexit hook: close any persistent browser session.
+
+    `asyncio.run` falha com RuntimeError se ja existe um loop rodando
+    (raro em atexit, mas acontece em testes / embedding). Quando isso
+    ocorre, usamos um loop dedicado para o shutdown e logamos qualquer
+    erro real ao inves de engolir tudo (#055).
+    """
     try:
         from alpha.tools.browser_session import shutdown_browser
 
-        asyncio.run(shutdown_browser())
-    except Exception:
-        pass
+        try:
+            asyncio.get_running_loop()
+            # Loop ativo (raro em atexit) — cria um separado para nao
+            # interferir. Se nao existir browser aberto, e no-op rapido.
+            new_loop = asyncio.new_event_loop()
+            try:
+                new_loop.run_until_complete(shutdown_browser())
+            finally:
+                new_loop.close()
+        except RuntimeError:
+            # Sem loop ativo (caminho normal em atexit).
+            asyncio.run(shutdown_browser())
+    except ImportError:
+        pass  # Playwright nao instalado, sem session pra fechar
+    except Exception as e:
+        # Logar para diagnostico — antes era engolido em `except: pass`.
+        # Usar print ao inves de logger porque atexit roda apos shutdown
+        # do logging em alguns paths.
+        try:
+            print(f"shutdown_browser_session: {type(e).__name__}: {e}",
+                  file=sys.stderr)
+        except Exception:
+            pass
 
 
 def _shutdown_mcp_servers():
@@ -174,6 +200,37 @@ atexit.register(_fire_on_stop)
 atexit.register(_shutdown_browser_session)
 atexit.register(_shutdown_mcp_servers)
 atexit.register(cleanup_temp_images)
+
+
+def _install_sigterm_handler():
+    """Trigger atexit cleanup on SIGTERM (#067).
+
+    Sem isto, `kill <pid>` (default SIGTERM, ex: container shutdown,
+    systemd timeout) mata o processo SEM rodar atexit hooks: browser
+    runtime fica zumbi, sessao nao salva, MCP servers ficam orfaos.
+    `signal.signal(SIGTERM, ...)` faz o handler sair via `sys.exit`,
+    o que dispara os atexit. Em SO sem SIGTERM (Windows nativo) e
+    no-op silencioso.
+    """
+    import signal as _signal
+    if not hasattr(_signal, "SIGTERM"):
+        return
+
+    def _on_sigterm(signum, frame):
+        try:
+            print("\n[ALPHA] SIGTERM received — running cleanup", file=sys.stderr)
+        except Exception:
+            pass
+        sys.exit(143)  # 128 + SIGTERM(15) — convencao POSIX
+
+    try:
+        _signal.signal(_signal.SIGTERM, _on_sigterm)
+    except (ValueError, OSError):
+        # Em threads non-main signal.signal levanta — ok ignorar.
+        pass
+
+
+_install_sigterm_handler()
 
 
 async def _run_once(messages, user_message, provider, temperature, get_tool_fn, tools, workspace=None):
