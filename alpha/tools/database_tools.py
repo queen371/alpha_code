@@ -202,8 +202,23 @@ async def _query_sqlite(db_path: str, query: str, read_only: bool) -> dict:
         finally:
             conn.close()
 
+    # #D005: sem `wait_for`, uma query SQLite que trava (lock contention,
+    # corrupted page) pendurava o agent indefinidamente. Cap de 30s alinha
+    # com TOOL_TIMEOUTS["database"].
+    from ..config import TOOL_TIMEOUTS
+    db_timeout = TOOL_TIMEOUTS.get("database", 30)
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _execute)
+    try:
+        return await asyncio.wait_for(
+            loop.run_in_executor(None, _execute),
+            timeout=db_timeout,
+        )
+    except TimeoutError:
+        return {
+            "error": f"SQLite query excedeu timeout de {db_timeout}s",
+            "timeout": True,
+            "query": query,
+        }
 
 
 async def _query_database(
@@ -239,15 +254,22 @@ async def _query_database(
         except ImportError:
             return {"error": "asyncpg não instalado. Execute: pip install asyncpg"}
 
+        # #048: cap dedicado para fetch (nao apenas pool acquire).
+        from ..config import TOOL_TIMEOUTS
+        fetch_timeout = TOOL_TIMEOUTS.get("database", 30)
         try:
             pool = await asyncio.wait_for(_get_pg_pool(connection), timeout=10)
             async with pool.acquire() as conn:
                 if _is_write_query(query):
                     if read_only:
                         return {"error": "Query de escrita bloqueada em modo read_only"}
-                    result = await conn.execute(query)
+                    result = await asyncio.wait_for(
+                        conn.execute(query), timeout=fetch_timeout
+                    )
                     return {"result": result, "query": query}
-                rows = await conn.fetch(query)
+                rows = await asyncio.wait_for(
+                    conn.fetch(query), timeout=fetch_timeout
+                )
                 rows_list = [dict(r) for r in rows[:_MAX_ROWS]]
                 columns = list(rows_list[0].keys()) if rows_list else []
                 return {
@@ -258,7 +280,10 @@ async def _query_database(
                     "query": query,
                 }
         except TimeoutError:
-            return {"error": "Timeout ao conectar ao PostgreSQL"}
+            return {
+                "error": f"PostgreSQL operation excedeu timeout de {fetch_timeout}s",
+                "timeout": True,
+            }
         except Exception as e:
             # asyncpg errors podem incluir o DSN com password no str(e).
             return {"error": sanitize_for_log(f"PostgreSQL error: {e}")}
@@ -315,14 +340,19 @@ async def _describe_table(connection: str, table: str, db_type: str = "sqlite") 
         except ImportError:
             return {"error": "asyncpg não instalado. Execute: pip install asyncpg"}
 
+        from ..config import TOOL_TIMEOUTS
+        fetch_timeout = TOOL_TIMEOUTS.get("database", 30)
         try:
             pool = await asyncio.wait_for(_get_pg_pool(connection), timeout=10)
             async with pool.acquire() as conn:
-                rows = await conn.fetch(
-                    "SELECT column_name, data_type, is_nullable, column_default "
-                    "FROM information_schema.columns WHERE table_name = $1 "
-                    "ORDER BY ordinal_position",
-                    table,
+                rows = await asyncio.wait_for(
+                    conn.fetch(
+                        "SELECT column_name, data_type, is_nullable, column_default "
+                        "FROM information_schema.columns WHERE table_name = $1 "
+                        "ORDER BY ordinal_position",
+                        table,
+                    ),
+                    timeout=fetch_timeout,
                 )
                 rows_list = [dict(r) for r in rows]
                 columns = list(rows_list[0].keys()) if rows_list else []

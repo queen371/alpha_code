@@ -203,10 +203,20 @@ def save_session(
         data["metadata"] = metadata
 
     path = _session_path(session_id)
-    _atomic_write(path, json.dumps(data, ensure_ascii=False, indent=2))
+    try:
+        _atomic_write(path, json.dumps(data, ensure_ascii=False, indent=2))
+    except OSError as e:
+        # Disco cheio / permissao / NFS hiccup nao deve derrubar o REPL.
+        # Loga e retorna o path mesmo sem persistir — o caller decide se
+        # tenta /save de novo ou aceita perda da sessao (#014/#D009).
+        logger.warning(f"save_session failed ({path}): {e}")
+        return path
     logger.info(f"Session saved: {path}")
 
-    _cleanup_old_sessions()
+    try:
+        _cleanup_old_sessions()
+    except OSError as e:
+        logger.debug(f"_cleanup_old_sessions failed: {e}")
     return path
 
 

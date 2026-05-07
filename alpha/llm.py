@@ -342,20 +342,10 @@ async def stream_chat_with_tools(
             }
             return
 
-        except httpx.HTTPStatusError as e:
-            body = ""
-            try:
-                body = sanitize_for_log(e.response.text, max_chars=500)
-            except (AttributeError, UnicodeDecodeError):
-                pass
-            logger.error(f"LLM HTTP error: {e.response.status_code} | body: {body}")
-            yield {
-                "type": "final",
-                "content": accumulated_content,
-                "tool_calls": [],
-                "error": f"HTTP error ({e.response.status_code})",
-            }
-            return
+        # Nota: httpx.HTTPStatusError nao e capturado porque `client.stream`
+        # NAO chama `raise_for_status()` automaticamente — o status_code
+        # >= 400 e tratado inline no caminho principal (linhas ~190 e
+        # ~226). Manter um handler aqui era codigo morto (#052).
 
         except (ConnectionError, OSError) as e:
             last_error = f"Connection error: {e}"

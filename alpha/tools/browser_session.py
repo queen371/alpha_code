@@ -120,6 +120,10 @@ class BrowserSession:
             self.playwright = None
             self.pages = []
             self.active_idx = 0
+        # Reset do singleton (#054): sem isto, proximo `BrowserSession.get()`
+        # retorna a mesma instancia fechada com listeners stale. Reabrir cria
+        # nova instancia limpa.
+        BrowserSession._instance = None
 
 
 def validate_browser_url(url: str) -> str | None:

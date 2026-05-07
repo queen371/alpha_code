@@ -223,18 +223,26 @@ async def extract_page_content(url: str, timeout: float = 10.0, max_chars: int =
 
     # Trafilatura (best quality)
     text = ""
+    fallback_used = False
     try:
         import trafilatura
 
         text = await asyncio.to_thread(trafilatura.extract, html) or ""
     except ImportError:
-        pass
+        # Trafilatura nao instalada — fallback silencioso para strip basico.
+        fallback_used = True
     except Exception as e:
-        logger.warning(f"Trafilatura failed for {url}: {e}")
+        # #059: antes era warning silencioso; o caller nao sabia que pegou
+        # texto degradado. Loga com exc_info para diagnostico e marca uso
+        # de fallback.
+        logger.warning(f"Trafilatura failed for {url}, using HTML strip: {e}", exc_info=True)
+        fallback_used = True
 
     # Fallback: strip HTML
     if not text:
         text = _strip_html(html)
+        if not fallback_used:
+            logger.info(f"extract_page_content fell back to HTML strip for {url}")
 
     return text[:max_chars]
 

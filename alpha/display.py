@@ -268,6 +268,11 @@ def print_approval_request(tool_name: str, args: dict) -> bool:
     except EOFError:
         print(f"  {c(C.GRAY, '(auto-denied — sem terminal interativo)')}")
         return False
+    except KeyboardInterrupt:
+        # Sem este handler, Ctrl+C durante o prompt mata o REPL inteiro.
+        # Tratar como "negado" e devolver controle preserva a sessao.
+        print(f"\n  {c(C.RED, '✗ Negado (Ctrl+C)')}")
+        return False
 
 
 def print_phase(detail: str) -> None:

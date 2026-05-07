@@ -243,8 +243,19 @@ async def _run_subagent(
             elif event["type"] == "error":
                 errors.append(event.get("message", "unknown error"))
     except Exception as e:
-        logger.error(f"Sub-agent failed: {e}")
-        return {"error": f"Sub-agent execution failed: {e}"}
+        # #056: log full traceback (logger.error sem exc_info perdia o
+        # frame onde o bug realmente aconteceu). #061: limpar scratch dir
+        # se ficou vazio para nao acumular diretorios orfaos por falha.
+        logger.error(f"Sub-agent {agent_id} failed: {e}", exc_info=True)
+        try:
+            if scratch_dir.exists() and not any(scratch_dir.iterdir()):
+                scratch_dir.rmdir()
+        except OSError:
+            pass
+        return {
+            "error": f"Sub-agent execution failed: {type(e).__name__}: {e}",
+            "agent_id": agent_id,
+        }
 
     scratch_files = await asyncio.to_thread(_snapshot_dir, scratch_dir)
 
