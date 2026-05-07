@@ -42,21 +42,41 @@ class TestLoopDetectionStillWorks:
         new_sig = "git_operation:{\"action\": \"status\"}"
         assert _detect_loop([new_sig], recent, []) is None
 
-    def test_similar_calls_still_detected(self):
-        # 5 calls do mesmo tool com paths similares -> deve ainda detectar
-        # apesar do short-circuit de "candidates < threshold"
-        recent = [
-            "read_file:{\"path\": \"/long/path/file_1.py\"}",
-            "read_file:{\"path\": \"/long/path/file_2.py\"}",
-            "read_file:{\"path\": \"/long/path/file_3.py\"}",
-            "read_file:{\"path\": \"/long/path/file_4.py\"}",
-            "read_file:{\"path\": \"/long/path/file_5.py\"}",
-        ]
-        new_sig = "read_file:{\"path\": \"/long/path/file_6.py\"}"
-        result = _detect_loop([new_sig], recent, [])
-        # Pode ser similar ou exact dependendo do threshold; o ponto e que
-        # detecta loop real
+    def test_similar_calls_with_repeated_arg_detected(self):
+        # 5 calls com EXATAMENTE o mesmo argumento -> exact repeat (#D013)
+        sig = "read_file:{\"path\": \"/long/path/file_1.py\"}"
+        recent = [sig] * 5
+        result = _detect_loop([sig], recent, [])
         assert result is not None
+
+    def test_sibling_paths_not_flagged_as_loop(self):
+        # Regressao: explorar 6 arquivos irmaos no mesmo diretorio NAO e loop
+        # — e exploracao legitima. Antes do strip-prefix em _are_similar, o
+        # SequenceMatcher dava ~0.97 ratio (prefixo dominante) e disparava
+        # falso positivo, matando analises de projeto cedo demais.
+        recent = [
+            "read_file:{\"path\": \"/home/u/proj/alpha/agent.py\"}",
+            "read_file:{\"path\": \"/home/u/proj/alpha/llm.py\"}",
+            "read_file:{\"path\": \"/home/u/proj/alpha/executor.py\"}",
+            "read_file:{\"path\": \"/home/u/proj/alpha/config.py\"}",
+            "read_file:{\"path\": \"/home/u/proj/alpha/display.py\"}",
+        ]
+        new_sig = "read_file:{\"path\": \"/home/u/proj/alpha/hooks.py\"}"
+        assert _detect_loop([new_sig], recent, []) is None
+
+    def test_sibling_directories_not_flagged_as_loop(self):
+        # Regressao do bug reportado: list_directory em irmaos do mesmo
+        # projeto era flagado como loop por causa do prefixo compartilhado
+        # /home/freire/Documents/MeusProjetos/Alpha_Code/.
+        recent = [
+            "list_directory:{\"path\": \"/home/freire/Documents/MeusProjetos/Alpha_Code\"}",
+            "list_directory:{\"path\": \"/home/freire/Documents/MeusProjetos/Alpha_Code/alpha\"}",
+            "list_directory:{\"path\": \"/home/freire/Documents/MeusProjetos/Alpha_Code/agents\"}",
+            "list_directory:{\"path\": \"/home/freire/Documents/MeusProjetos/Alpha_Code/tests\"}",
+            "list_directory:{\"path\": \"/home/freire/Documents/MeusProjetos/Alpha_Code/skills\"}",
+        ]
+        new_sig = "list_directory:{\"path\": \"/home/freire/Documents/MeusProjetos/Alpha_Code/docs\"}"
+        assert _detect_loop([new_sig], recent, []) is None
 
 
 # ─── #D015 ───────────────────────────────────────────────────────

@@ -31,6 +31,10 @@ _SIMILAR_REPEAT_CALLS = 5    # similar calls threshold (higher to avoid false po
 _SIMILARITY_THRESHOLD = 0.92  # fuzzy match threshold for "similar" calls
 _CYCLE_WINDOW = 20            # look-back window for cycle detection
 _STALE_WINDOW = 6             # if last N tool calls produced no new info → stale
+_LOOP_DETECT_MIN_ITER = 3    # don't run loop detection before this iteration —
+                              # parallel tool batches in the first 1-2 turns are
+                              # exploration, not loops. Avoids false positives
+                              # when the model fans out across many paths early.
 
 
 def _call_signature(tc: dict) -> str:
@@ -71,11 +75,27 @@ def _parse_args_values(args_str: str) -> list[str]:
     return [args_str]
 
 
+def _strip_common_prefix(va: str, vb: str) -> tuple[str, str]:
+    """Drop the longest common prefix from two strings.
+
+    Path-like args (e.g. ``/home/u/project/alpha`` vs ``/home/u/project/tests``)
+    share a long prefix that dominates SequenceMatcher.ratio(), making distinct
+    sibling paths look "similar" and triggering false-positive loop detection.
+    Comparing only the differing tail collapses that bias.
+    """
+    n = min(len(va), len(vb))
+    i = 0
+    while i < n and va[i] == vb[i]:
+        i += 1
+    return va[i:], vb[i:]
+
+
 def _are_similar(sig_a: str, sig_b: str) -> bool:
     """Check if two call signatures are similar (same tool, same effective args).
 
-    Compares individual argument values instead of the raw JSON string,
-    which avoids false positives from long shared path prefixes.
+    Compares individual argument values with a path-prefix-aware ratio: the
+    longest common prefix is stripped before measuring similarity, so sibling
+    paths under the same root don't trip the threshold.
     """
     name_a, _, args_a = sig_a.partition(":")
     name_b, _, args_b = sig_b.partition(":")
@@ -95,7 +115,14 @@ def _are_similar(sig_a: str, sig_b: str) -> bool:
     for va, vb in zip(vals_a, vals_b):
         if va == vb:
             continue
-        ratio = SequenceMatcher(None, va[:300], vb[:300]).ratio()
+        # Strip shared prefix so two sibling paths don't look identical just
+        # because they live under the same project root.
+        ta, tb = _strip_common_prefix(va[:300], vb[:300])
+        # Empty tails after stripping mean one is a prefix of the other —
+        # treat as similar (same target, deeper/shallower view).
+        if not ta or not tb:
+            continue
+        ratio = SequenceMatcher(None, ta, tb).ratio()
         if ratio < _SIMILARITY_THRESHOLD:
             return False
     return True
@@ -330,13 +357,31 @@ async def run_agent(
         if len(_recent_calls) > _CYCLE_WINDOW * 3:
             _recent_calls[:] = _recent_calls[-_CYCLE_WINDOW * 3:]
 
-        loop_reason = _detect_loop(call_sigs, _recent_calls, _recent_results)
+        # Skip loop detection during early exploration. A single iteration with
+        # a parallel tool batch (e.g. project analysis spreading list_directory
+        # across siblings) shouldn't be flagged as a loop — by definition, a
+        # loop requires repetition across iterations.
+        if iteration + 1 < _LOOP_DETECT_MIN_ITER:
+            loop_reason = None
+        else:
+            loop_reason = _detect_loop(call_sigs, _recent_calls, _recent_results)
 
         if loop_reason:
             logger.warning(
                 f"Loop detected ({loop_reason}) at iteration {iteration + 1} "
                 f"— forcing final response"
             )
+            # Preserve the assistant's content from this turn so the forced
+            # final has continuity, but DROP the unfulfilled tool_calls. If
+            # we appended tool_calls without matching `tool` responses, the
+            # provider would reject the next request (HTTP 400). And without
+            # any assistant trace, the model often dumps the tool calls it
+            # wanted as raw text (XML/JSON) — visible as `<invoke>` blocks
+            # leaking to the terminal.
+            if final_event.get("content"):
+                messages.append(
+                    {"role": "assistant", "content": final_event["content"]}
+                )
             # Usar role=user em vez de system: providers como OpenAI strict
             # mode e alguns Ollama models rejeitam/ignoram system message
             # tardia, alem de competir com a system message original em
@@ -349,7 +394,9 @@ async def run_agent(
                         f"[ALPHA SYSTEM NOTE] Loop detected ({loop_reason}). "
                         "STOP calling tools and produce your final response now "
                         "based on the data already collected. Synthesize ALL information from "
-                        "previous calls into a complete response."
+                        "previous calls into a complete response. "
+                        "Do NOT emit tool calls in any format — not as JSON, "
+                        "not as XML, not as <invoke> tags. Reply in plain prose."
                     ),
                 }
             )
