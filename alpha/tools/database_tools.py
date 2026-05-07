@@ -11,7 +11,7 @@ import logging
 import re
 import sqlite3
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from .._security_log import sanitize_for_log
 from ..net_utils import is_private_ip as _is_private_ip
@@ -167,7 +167,10 @@ async def _query_sqlite(db_path: str, query: str, read_only: bool) -> dict:
         # Use URI mode=ro for true read-only enforcement (cannot be bypassed)
         if read_only:
             resolved = Path(db_path).expanduser().resolve()
-            uri = f"file:{resolved}?mode=ro"
+            # #D024: filenames com `?` ou `#` (validos em Linux/macOS)
+            # quebrariam a URI sem url-encoding — segundo `?` vira query
+            # continuation, `#` vira fragment. quote preserva `/` por default.
+            uri = f"file:{quote(str(resolved))}?mode=ro"
             conn = sqlite3.connect(uri, uri=True)
         else:
             conn = sqlite3.connect(db_path)

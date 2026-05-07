@@ -14,7 +14,7 @@ from pathlib import Path
 
 from . import ToolDefinition, ToolSafety, register_tool
 from .safe_env import get_safe_env
-from .shell_tools import ALLOWED_COMMANDS, HARD_BLOCKED
+from .shell_tools import HARD_BLOCKED
 from .workspace import AGENT_WORKSPACE
 
 logger = logging.getLogger(__name__)

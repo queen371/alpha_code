@@ -180,7 +180,16 @@ async def _glob_files(pattern: str, path: str = ".") -> dict:
         return {"error": f"Caminho não encontrado: {path}"}
 
     matches = []
+    skipped_outside = 0
     for match in sorted(p.glob(pattern)):
+        # #D025: workspace dentro do glob — se p contem symlink que aponta
+        # para fora, glob seguiria e listaria filenames externos. read_file
+        # depois bloquearia, mas o filename ja vazou estrutura externa.
+        try:
+            match.resolve().relative_to(AGENT_WORKSPACE)
+        except (ValueError, OSError):
+            skipped_outside += 1
+            continue
         info = {"path": str(match), "type": "dir" if match.is_dir() else "file"}
         if match.is_file():
             try:
@@ -191,7 +200,15 @@ async def _glob_files(pattern: str, path: str = ".") -> dict:
         if len(matches) >= 200:
             break
 
-    return {"pattern": pattern, "base_path": str(p), "count": len(matches), "matches": matches}
+    result = {
+        "pattern": pattern,
+        "base_path": str(p),
+        "count": len(matches),
+        "matches": matches,
+    }
+    if skipped_outside:
+        result["skipped_outside_workspace"] = skipped_outside
+    return result
 
 
 # ─── Destructive Tools ───

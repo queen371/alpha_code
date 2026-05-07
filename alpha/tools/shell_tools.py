@@ -9,70 +9,15 @@ from . import ToolDefinition, ToolSafety, register_tool
 from .safe_env import get_safe_env
 from .workspace import AGENT_WORKSPACE
 
-# ─── Security: Allowlist + Hard Blocks ───
-
-# Commands explicitly allowed for execution
-ALLOWED_COMMANDS = frozenset(
-    {
-        # Filesystem navigation and inspection
-        "ls", "cat", "head", "tail", "wc", "find", "file", "stat",
-        "du", "df", "tree", "realpath", "basename", "dirname",
-        "readlink", "pwd",
-        # Text processing
-        "grep", "awk", "sed", "sort", "uniq", "cut", "tr", "diff", "jq",
-        # Development
-        "python3", "python", "pip", "pip3",
-        "node", "npm", "npx", "yarn", "pnpm", "bun",
-        "git", "make",
-        "cargo", "go", "rustc", "gcc", "g++", "javac", "java",
-        "mvn", "gradle",
-        "ruff", "eslint", "prettier", "mypy", "tsc",
-        "pytest", "vitest", "jest",
-        # Networking (read-only / recon)
-        "curl", "wget", "ping", "nslookup", "dig", "traceroute", "tracepath",
-        "mtr", "host", "whois", "nmap", "tcpdump", "netstat", "ss",
-        "ip", "route", "arp", "ifconfig", "iwconfig", "nmcli",
-        "hostname",
-        # Package managers
-        "apt", "apt-get", "brew", "dnf", "yum",
-        # Archives
-        "tar", "zip", "unzip", "gzip", "gunzip",
-        # System info
-        "uname", "whoami", "id", "groups", "env", "printenv",
-        "date", "uptime", "ps", "top", "htop", "free",
-        "lscpu", "lsblk", "lspci", "lsusb", "lsmem", "lshw",
-        "nproc", "getconf", "blkid", "fdisk", "parted",
-        "vmstat", "iostat", "mpstat", "sar",
-        "sensors", "inxi", "neofetch", "screenfetch",
-        "hostnamectl", "timedatectl", "journalctl", "dmesg",
-        "last", "w",
-        # Docker
-        "docker", "docker-compose",
-        # Desktop / multimedia control
-        "pactl", "pacmd", "amixer", "wpctl",        # volume / audio
-        "playerctl",                                  # media player
-        "brightnessctl", "xbacklight",                # brightness
-        "xrandr", "wlr-randr",                        # display
-        "xdg-open", "xdg-mime",                       # open files/URLs
-        "xdotool",
-        "xclip", "xsel", "wl-copy", "wl-paste",      # clipboard / input
-        "bluetoothctl",                                # bluetooth
-        "gsettings", "dconf",                          # desktop settings
-        "notify-send",                                 # notifications
-        "xset", "setxkbmap",                           # keyboard/display
-        # Misc utilities
-        "echo", "printf", "test", "true", "false", "yes",
-        "tee", "xargs",
-        "touch", "mkdir", "cp", "mv", "rm",
-        "chmod", "chown", "ln",
-        "which", "type", "command",
-        # Privilege probes (restricted args — see _is_sudo_safe)
-        "sudo",
-    }
-)
+# ─── Security: Hard Blocks (denylist model) ───
+#
+# Politica real (#D027): denylist only. Qualquer comando que NAO bate com
+# `HARD_BLOCKED` abaixo passa pelo approval layer. A `ALLOWED_COMMANDS`
+# frozenset que vivia aqui ate 2026-05-07 era codigo morto — nunca era
+# consultada por `_validate_command`. Removida pra evitar confusao em
+# leitores/auditores que assumiam allowlist enforcement.
 
 # Catastrophic / system-destructive patterns — blocked regardless of approval.
-# Model: denylist only. Any command not matched here is allowed (subject to approval).
 HARD_BLOCKED = [
     # Recursive file deletion
     re.compile(r"\brm\s+(?:-\S*[rR]\S*|--recursive\b)", re.IGNORECASE),
@@ -290,10 +235,10 @@ register_tool(
     ToolDefinition(
         name="execute_shell",
         description=(
-            "Executar um comando no sistema. Pipes (|) SÃO suportados quando "
-            "todos os comandos do pipeline estão na lista safe; "
-            "outros operadores (&&, ||, ;, >, <, $()) NÃO são suportados — "
-            "use execute_pipeline para isso. Retorna stdout, stderr e exit code."
+            "Executar um comando shell. Pipes (|) são suportados — cada "
+            "segmento e validado contra padrões catastróficos. "
+            "Para && / || / ; / redirects (>, 2>) use execute_pipeline. "
+            "Timeout máximo: 300s. Retorna stdout, stderr, exit_code."
         ),
         parameters={
             "type": "object",

@@ -61,8 +61,19 @@ async def _run_actor(
         except httpx.RequestError as e:
             return {"error": f"Request failed: {e}"}
 
-        run_data = resp.json()["data"]
-        run_id = run_data["id"]
+        # #D026: parse defensivo. Apify pode retornar shape diferente em
+        # token expirado, rate limit, ou breaking change da API. Sem isso,
+        # KeyError sobe cru ate o executor.
+        try:
+            payload = resp.json()
+        except ValueError as e:
+            return {"error": f"Apify returned non-JSON response: {e}"}
+        run_data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(run_data, dict):
+            return {"error": f"Apify response shape inesperada: {str(payload)[:200]}"}
+        run_id = run_data.get("id")
+        if not run_id:
+            return {"error": f"Apify response sem run id: {str(payload)[:200]}"}
         dataset_id = run_data.get("defaultDatasetId")
 
         logger.info(f"Apify Actor run started: {run_id}")
@@ -102,7 +113,18 @@ async def _run_actor(
                 continue
             consecutive_errors = 0  # sucesso reseta contador
 
-            status = status_resp.json()["data"]["status"]
+            try:
+                status_payload = status_resp.json()
+                status = status_payload.get("data", {}).get("status")
+            except ValueError:
+                status = None
+            if status is None:
+                # Status JSON malformado — tratar como soft error e retentar
+                consecutive_errors += 1
+                logger.warning(
+                    f"Apify status response malformed ({consecutive_errors}x consecutive)"
+                )
+                continue
 
             if status == "SUCCEEDED":
                 break
@@ -125,6 +147,10 @@ async def _run_actor(
             items = items_resp.json()
         except httpx.HTTPError as e:
             return {"error": f"Failed to fetch results: {e}", "run_id": run_id}
+        except ValueError as e:
+            return {"error": f"Apify items endpoint returned non-JSON: {e}", "run_id": run_id}
+        if not isinstance(items, list):
+            items = []
 
     return {
         "status": "SUCCEEDED",
@@ -158,7 +184,13 @@ async def _list_actors(
         except httpx.HTTPError as e:
             return {"error": f"Failed to list actors: {e}"}
 
-        data = resp.json()["data"]
+        try:
+            payload = resp.json()
+        except ValueError as e:
+            return {"error": f"Apify returned non-JSON: {e}"}
+        data = payload.get("data") if isinstance(payload, dict) else {}
+        if not isinstance(data, dict):
+            data = {}
         actors = [
             {
                 "id": a.get("username", "") + "/" + a.get("name", ""),

@@ -107,8 +107,12 @@ def _calc_backoff(attempt: int, retry_after: float | None = None) -> float:
     intervals instead of retrying in lockstep.
     """
     if retry_after is not None:
-        # Add small jitter even to server-specified delays
-        return min(retry_after, MAX_BACKOFF) * (0.8 + random.random() * 0.4)
+        # Add small jitter even to server-specified delays. Jitter pode
+        # ate 1.2x o base, entao precisamos do `min(..., MAX_BACKOFF)`
+        # explicito (#D023): sem ele, o resultado podia exceder o cap em
+        # ate 20% (ex: 30s -> 36s) violando o invariante anunciado.
+        base = min(retry_after, MAX_BACKOFF)
+        return min(base * (0.8 + random.random() * 0.4), MAX_BACKOFF)
     delay = INITIAL_BACKOFF * (BACKOFF_MULTIPLIER ** attempt)
     # Full jitter: uniform random between 0 and calculated delay
     jittered = delay * (0.5 + random.random() * 0.5)

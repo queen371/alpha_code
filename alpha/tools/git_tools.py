@@ -325,12 +325,11 @@ async def _git_operation(
         extra, err = _sanitize_git_args("push", args)
         if err:
             return {"error": err}
-        # Block force push to main/master
-        if "--force" in extra or "-f" in extra:
-            result = await _run_git(["branch", "--show-current"], cwd)
-            current = result.get("stdout", "").strip()
-            if current in ("main", "master"):
-                return {"error": "Force push para main/master não é permitido"}
+        # Force push e bloqueado a priori: `_ALLOWED_GIT_FLAGS["push"]` so
+        # permite `--set-upstream`, `-u`, `--tags`. Qualquer `--force`/`-f`
+        # rejeitado pelo `_sanitize_git_args` antes de chegar aqui (#D029).
+        # Se um dia force push for permitido em branches nao-main, lembrar
+        # de adicionar a allowlist E reintroduzir o check de current branch.
         return await _run_git(["push"] + extra, cwd, timeout=60)
 
     elif action == "merge":

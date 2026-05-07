@@ -105,23 +105,30 @@ def _annotate_error(result: dict, category: str) -> dict:
     return out
 
 
+def _append_tool_msg(messages: list[dict], tc_id: str, result: dict, tool_name: str) -> None:
+    """Append a tool result message with truncation + UTF-8 safe formatting.
+
+    Centraliza o `messages.append({...content: ...})` para que erro paths
+    e success paths usem o mesmo `_format_result` (truncamento, preview por
+    campo). Sem este helper, error messages com paths absolutos longos
+    podiam passar de TOOL_RESULT_MAX_CHARS (#D022).
+    """
+    messages.append({
+        "role": "tool",
+        "tool_call_id": tc_id,
+        "content": _format_result(result, tool_name),
+    })
+
+
 def _record_skip(tc: dict, tool_name: str, result: dict, messages: list[dict]) -> dict:
     """Append a denied/skipped result to messages and return the event dict."""
     annotated = _annotate_error(result, "denied")
-    messages.append({
-        "role": "tool",
-        "tool_call_id": tc["id"],
-        "content": json.dumps(annotated, ensure_ascii=False),
-    })
+    _append_tool_msg(messages, tc["id"], annotated, tool_name)
     return {"type": "tool_result", "name": tool_name, "result": annotated, "denied": True}
 
 
 def _record_result(tc: dict, tool_name: str, result: dict, messages: list[dict]) -> None:
-    messages.append({
-        "role": "tool",
-        "tool_call_id": tc["id"],
-        "content": _format_result(result, tool_name),
-    })
+    _append_tool_msg(messages, tc["id"], result, tool_name)
 
 
 async def _execute_single_tool(tool_def, tool_name: str, args: dict) -> dict:
@@ -283,11 +290,7 @@ async def execute_tool_calls(
             )
             yield {"type": "tool_call", "name": tool_name, "args": {}, "safety": "unknown"}
             yield {"type": "tool_result", "name": tool_name, "result": result}
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc["id"],
-                "content": json.dumps(result, ensure_ascii=False),
-            })
+            _append_tool_msg(messages, tc["id"], result, tool_name)
             continue
 
         args, parse_error = _parse_and_validate_args(tc, tool_def)
@@ -295,11 +298,7 @@ async def execute_tool_calls(
             parse_error = _annotate_error(parse_error, "parse_error")
             yield {"type": "tool_call", "name": tool_name, "args": {}, "safety": "denied"}
             yield {"type": "tool_result", "name": tool_name, "result": parse_error}
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc["id"],
-                "content": json.dumps(parse_error, ensure_ascii=False),
-            })
+            _append_tool_msg(messages, tc["id"], parse_error, tool_name)
             continue
 
         ok, args, err = _enforce_workspace(workspace, tool_name, args)
@@ -309,11 +308,7 @@ async def execute_tool_calls(
             )
             yield {"type": "tool_call", "name": tool_name, "args": args, "safety": "denied"}
             yield {"type": "tool_result", "name": tool_name, "result": result}
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc["id"],
-                "content": json.dumps(result, ensure_ascii=False),
-            })
+            _append_tool_msg(messages, tc["id"], result, tool_name)
             continue
 
         safety = getattr(tool_def, "safety", None)
@@ -380,11 +375,7 @@ async def execute_tool_calls(
             logger.error(f"Parallel tool execution error ({tool_name}): {type(r).__name__}: {r}")
             result = {"error": f"{type(r).__name__}: {r}"}
             yield {"type": "tool_result", "name": tool_name, "result": result}
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc["id"],
-                "content": json.dumps(result, ensure_ascii=False),
-            })
+            _append_tool_msg(messages, tc["id"], result, tool_name)
             continue
 
         tc, tool_name, args, result = r
@@ -415,11 +406,7 @@ async def _execute_sequential(
             )
             yield {"type": "tool_call", "name": tool_name, "args": {}, "safety": "unknown"}
             yield {"type": "tool_result", "name": tool_name, "result": result}
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc["id"],
-                "content": json.dumps(result, ensure_ascii=False),
-            })
+            _append_tool_msg(messages, tc["id"], result, tool_name)
             continue
 
         args, parse_error = _parse_and_validate_args(tc, tool_def)
@@ -427,11 +414,7 @@ async def _execute_sequential(
             parse_error = _annotate_error(parse_error, "parse_error")
             yield {"type": "tool_call", "name": tool_name, "args": {}, "safety": "denied"}
             yield {"type": "tool_result", "name": tool_name, "result": parse_error}
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc["id"],
-                "content": json.dumps(parse_error, ensure_ascii=False),
-            })
+            _append_tool_msg(messages, tc["id"], parse_error, tool_name)
             continue
 
         ok, args, err = _enforce_workspace(workspace, tool_name, args)
@@ -441,11 +424,7 @@ async def _execute_sequential(
             )
             yield {"type": "tool_call", "name": tool_name, "args": args, "safety": "denied"}
             yield {"type": "tool_result", "name": tool_name, "result": result}
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc["id"],
-                "content": json.dumps(result, ensure_ascii=False),
-            })
+            _append_tool_msg(messages, tc["id"], result, tool_name)
             continue
 
         safety = getattr(tool_def, "safety", None)
