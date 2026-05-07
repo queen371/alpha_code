@@ -78,10 +78,9 @@ SAFE_SHELL_COMMANDS = frozenset(
         "neofetch", "screenfetch", "hostnamectl", "timedatectl",
         "journalctl", "dmesg", "id", "groups", "last", "w", "nproc",
         "getconf", "lshw", "blkid", "fdisk", "parted",
+        # Networking info (read-only) — #083: dedupe
         "ip", "ss", "netstat", "route", "arp", "iwconfig", "ifconfig",
-        # Networking info (read-only)
         "ping", "nslookup", "dig",
-        "ip", "route", "arp", "ifconfig", "iwconfig",
         "hostname", "nmcli", "traceroute", "tracepath", "mtr", "host", "whois",
         # Filesystem read-only
         "ls", "cat", "head", "tail", "wc", "find", "file", "stat",

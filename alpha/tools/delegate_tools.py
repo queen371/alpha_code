@@ -195,7 +195,11 @@ async def _run_subagent(
         allowed = {s.strip() for s in tools_filter.split(",")}
         tools = [t for t in tools if t["function"]["name"] in allowed]
 
-    # Safe get_tool that blocks disallowed tools
+    # Safe get_tool wrapper: aplica a politica de blocklist montada acima
+    # (delegate_* anti-recursao + SUBAGENT_DESTRUCTIVE_BLOCKLIST quando
+    # nao ha approval callback do parent + filtro tools_filter quando
+    # explicito). Centraliza o gate para que `run_agent` interno nao
+    # consiga "burlar" via lookup direto no TOOL_REGISTRY (#091).
     original_get_tool = get_tool
     _all_blocked = _blocked
 

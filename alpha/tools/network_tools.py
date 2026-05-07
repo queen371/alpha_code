@@ -10,10 +10,11 @@ import asyncio
 import logging
 import random
 import ssl as _ssl
+import urllib.error
+import urllib.request
 from urllib.parse import urlparse, urlunparse
 
 from ..net_utils import (
-    is_private_ip_address as _is_private_ip_address,
     validate_url as _validate_url,
     resolve_and_validate as _resolve_and_validate,
 )
@@ -209,10 +210,7 @@ async def _http_request(
         return {"error": f"Erro na requisição: {e}"}
 
 
-import urllib.request as _urllib_request
-
-
-class _NoRedirectHandler(_urllib_request.HTTPRedirectHandler):
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
     """Prevent urllib from following redirects (DNS rebinding protection)."""
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -223,9 +221,6 @@ async def _http_request_urllib(
     url: str, method: str, headers: dict, body: str, timeout: int
 ) -> dict:
     """Fallback HTTP using urllib (stdlib)."""
-    import urllib.error
-    import urllib.request
-
     # Resolve DNS and validate IP BEFORE connecting (prevents DNS rebinding)
     parsed = urlparse(url)
     hostname = parsed.hostname

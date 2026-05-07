@@ -25,16 +25,14 @@ from .llm import stream_chat_with_tools
 
 logger = logging.getLogger(__name__)
 
-# ─── Loop detection config ───
-_MAX_REPEAT_CALLS = 3        # exact same call N times → loop
-_SIMILAR_REPEAT_CALLS = 5    # similar calls threshold (higher to avoid false positives)
-_SIMILARITY_THRESHOLD = 0.92  # fuzzy match threshold for "similar" calls
-_CYCLE_WINDOW = 20            # look-back window for cycle detection
-_STALE_WINDOW = 6             # if last N tool calls produced no new info → stale
-_LOOP_DETECT_MIN_ITER = 3    # don't run loop detection before this iteration —
-                              # parallel tool batches in the first 1-2 turns are
-                              # exploration, not loops. Avoids false positives
-                              # when the model fans out across many paths early.
+# ─── Loop detection config (#085: agrupado em config.LOOP_DETECTION) ───
+from .config import LOOP_DETECTION as _LD
+_MAX_REPEAT_CALLS = _LD["max_repeat_calls"]
+_SIMILAR_REPEAT_CALLS = _LD["similar_repeat_calls"]
+_SIMILARITY_THRESHOLD = _LD["similarity_threshold"]
+_CYCLE_WINDOW = _LD["cycle_window"]
+_STALE_WINDOW = _LD["stale_window"]
+_LOOP_DETECT_MIN_ITER = _LD["min_iter"]
 
 
 def _call_signature(tc: dict) -> str:

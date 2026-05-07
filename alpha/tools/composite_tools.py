@@ -166,7 +166,10 @@ async def _run_tests(
     if framework == "pytest":
         cmd = "python3 -m pytest -v"
         if pattern:
-            cmd += f" -k '{pattern}'"
+            # #090: shlex.quote evita quebra com pattern contendo aspas/espacos.
+            # Antes: f" -k '{pattern}'" — pattern="foo'bar" gerava cmd invalido.
+            import shlex as _shlex
+            cmd += f" -k {_shlex.quote(pattern)}"
     elif framework == "npm":
         cmd = "npm test"
     elif framework == "cargo":

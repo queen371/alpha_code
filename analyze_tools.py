@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+"""Dev utility: walk `alpha/tools/` and print a summary of registered tools.
+
+Counts `register_tool(...)` calls per file and groups by category. Helpful
+for verifying tool surface after refactors. Not imported by the runtime.
+Run via: `python analyze_tools.py`.
+"""
 import os
 import re
 import glob

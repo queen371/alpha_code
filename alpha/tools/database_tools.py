@@ -224,6 +224,29 @@ async def _query_sqlite(db_path: str, query: str, read_only: bool) -> dict:
         }
 
 
+def _validate_pg_ssrf(connection: str) -> dict | None:
+    """SSRF guard for PostgreSQL connection strings (#D013 V1.0).
+
+    Returns an error dict if the connection targets a private/internal IP,
+    None if the connection passes. Helper extracted from the duplicated
+    inline check that lived in `_query_database` and `_describe_table`.
+    """
+    try:
+        parsed_url = urlparse(connection)
+        pg_hostname = parsed_url.hostname
+        if pg_hostname and _is_private_ip(pg_hostname):
+            return {
+                "error": (
+                    f"Conexão a IP privado/interno bloqueada por segurança "
+                    f"(SSRF protection): {pg_hostname}"
+                ),
+                "blocked": True,
+            }
+    except Exception:
+        return {"error": "Connection string inválida para PostgreSQL"}
+    return None
+
+
 async def _query_database(
     connection: str,
     query: str,
@@ -240,17 +263,9 @@ async def _query_database(
         return await _query_sqlite(connection, query, read_only)
 
     elif db_type == "postgresql":
-        # Validate hostname against private IP ranges (SSRF protection)
-        try:
-            parsed_url = urlparse(connection)
-            pg_hostname = parsed_url.hostname
-            if pg_hostname and _is_private_ip(pg_hostname):
-                return {
-                    "error": f"Conexão a IP privado/interno bloqueada por segurança (SSRF protection): {pg_hostname}",
-                    "blocked": True,
-                }
-        except Exception:
-            return {"error": "Connection string inválida para PostgreSQL"}
+        ssrf_error = _validate_pg_ssrf(connection)
+        if ssrf_error is not None:
+            return ssrf_error
 
         try:
             import asyncpg  # noqa: F401  (validation only; pool import lazily)
@@ -325,17 +340,9 @@ async def _describe_table(connection: str, table: str, db_type: str = "sqlite") 
             read_only=True,
         )
     elif db_type == "postgresql":
-        # SSRF protection for PostgreSQL
-        try:
-            parsed_url = urlparse(connection)
-            pg_hostname = parsed_url.hostname
-            if pg_hostname and _is_private_ip(pg_hostname):
-                return {
-                    "error": f"Conexão a IP privado/interno bloqueada por segurança (SSRF protection): {pg_hostname}",
-                    "blocked": True,
-                }
-        except Exception:
-            return {"error": "Connection string inválida para PostgreSQL"}
+        ssrf_error = _validate_pg_ssrf(connection)
+        if ssrf_error is not None:
+            return ssrf_error
 
         # Usar parameterized query para PostgreSQL
         try:

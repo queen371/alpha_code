@@ -122,12 +122,14 @@ async def _execute_python(code: str, timeout: int | None = None) -> dict:
     if safety_error:
         return {"error": safety_error, "blocked": True}
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
-        f.write(code)
-        f.flush()
-        script_path = f.name
-
+    # #DM014: pre-init para garantir que `finally: os.unlink(script_path)`
+    # nao quebre com NameError caso a criacao do tempfile falhe.
+    script_path: str | None = None
     try:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+            f.write(code)
+            f.flush()
+            script_path = f.name
         proc = await asyncio.create_subprocess_exec(
             sys.executable,
             "-u",
@@ -160,10 +162,11 @@ async def _execute_python(code: str, timeout: int | None = None) -> dict:
     except Exception as e:
         return {"error": str(e)}
     finally:
-        try:
-            os.unlink(script_path)
-        except OSError:
-            pass
+        if script_path is not None:
+            try:
+                os.unlink(script_path)
+            except OSError:
+                pass
 
 
 async def _install_package(package: str) -> dict:

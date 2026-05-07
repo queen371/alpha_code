@@ -85,6 +85,15 @@ def _fuzzy_resolve_from_base(base: Path, components: list[str]) -> Path | None:
     return resolved if changed else None
 
 
+# #D005 (V1.0): cache LRU para fuzzy resolve. Cada path miss antes
+# tentava ate 3 bases (home, workspace, cwd) com listdir + match
+# case-insensitive — caro em sessoes que o LLM tenta multiplas variantes
+# do mesmo path. Cache mantem 256 entries; eviction natural via LRU.
+_FUZZY_CACHE_SIZE = 256
+_fuzzy_cache: dict[str, str | None] = {}
+_fuzzy_cache_order: list[str] = []
+
+
 def _fuzzy_resolve(path: str) -> str | None:
     """Try to resolve a path that doesn't exist by matching fuzzy variants.
 
@@ -93,6 +102,24 @@ def _fuzzy_resolve(path: str) -> str | None:
 
     Returns the corrected path string or None if no match found.
     """
+    cached = _fuzzy_cache.get(path, _SENTINEL)
+    if cached is not _SENTINEL:
+        return cached  # type: ignore[return-value]
+
+    result = _fuzzy_resolve_uncached(path)
+
+    _fuzzy_cache[path] = result
+    _fuzzy_cache_order.append(path)
+    if len(_fuzzy_cache_order) > _FUZZY_CACHE_SIZE:
+        evicted = _fuzzy_cache_order.pop(0)
+        _fuzzy_cache.pop(evicted, None)
+    return result
+
+
+_SENTINEL = object()
+
+
+def _fuzzy_resolve_uncached(path: str) -> str | None:
     p = Path(path).expanduser()
 
     if p.is_absolute():

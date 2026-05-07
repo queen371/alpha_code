@@ -6,7 +6,7 @@ VENV="$PROJECT_DIR/.venv/bin/python"
 
 if [ ! -f "$VENV" ]; then
     echo "Erro: venv não encontrado em $VENV"
-    echo "Execute: cd $PROJECT_DIR && python3 -m venv .venv && pip install -r requirements.txt"
+    echo "Execute: cd $PROJECT_DIR && python3 -m venv .venv && source .venv/bin/activate && pip install -e ."
     exit 1
 fi
 

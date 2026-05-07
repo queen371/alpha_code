@@ -14,9 +14,34 @@ load_dotenv(_PROJECT_ROOT / ".env", override=True)
 # ─── Defaults ───
 
 DEFAULT_PROVIDER = os.getenv("ALPHA_PROVIDER", "deepseek")
-MAX_ITERATIONS = 50
-TOOL_RESULT_MAX_CHARS = 12_000
-LLM_TIMEOUT = 300  # seconds per LLM call
+
+# #097 V1.1: limites de execucao agrupados em LIMITS para inspecao
+# uniforme. Chaves duplicadas no module-level (`MAX_ITERATIONS` etc)
+# ficam como aliases com retro-compat. Sub-agent limit tambem entra
+# aqui em vez de viver isolado em FEATURES.
+LIMITS = {
+    "max_iterations": 50,           # iteracoes do agent loop principal
+    "subagent_max_iterations": 15,  # iteracoes por sub-agent
+    "tool_result_max_chars": 12_000,
+    "llm_timeout": 300,             # seconds per LLM call
+    "max_messages": 500,            # hard cap antes de needs_compression
+}
+
+MAX_ITERATIONS = LIMITS["max_iterations"]
+TOOL_RESULT_MAX_CHARS = LIMITS["tool_result_max_chars"]
+LLM_TIMEOUT = LIMITS["llm_timeout"]
+
+# Loop detection (#085 V1.1): consts agrupadas em um dict para inspecao
+# uniforme (ex: ALPHA_LOOP_DETECT_DISABLE=1 pode levantar todos os
+# thresholds; testes podem mockar uma chave so). Lidas em alpha/agent.py.
+LOOP_DETECTION = {
+    "max_repeat_calls": 3,        # exact same call N times → loop
+    "similar_repeat_calls": 5,    # similar calls threshold (false-positive guard)
+    "similarity_threshold": 0.92, # fuzzy match threshold
+    "cycle_window": 20,           # look-back window for cycle detection
+    "stale_window": 6,            # last N tool calls com no new info → stale
+    "min_iter": 3,                # iter <= N nao rodam detection (exploration)
+}
 
 # ─── Provider configs ───
 
@@ -164,8 +189,6 @@ FEATURES: dict = {
     "max_delegate_total_tasks": 10,
 }
 
-# Alias for backward compatibility with tools that import ALPHA_FEATURES
-ALPHA_FEATURES = FEATURES
 
 # ─── Tool Timeouts (seconds) ───
 TOOL_TIMEOUTS: dict = {
