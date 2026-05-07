@@ -43,6 +43,10 @@ SUBAGENT_DESTRUCTIVE_BLOCKLIST = frozenset({
     "query_database", "clipboard_read", "clipboard_write", "install_package",
     "browser_click", "browser_fill", "browser_select_option",
     "browser_press_key", "browser_execute_js",
+    # apify_run_actor executa actor arbitrario com input arbitrario —
+    # vetor de exfil via actors maliciosos. Sub-agent sem callback nao
+    # pode chamar (#034).
+    "apify_run_actor",
 })
 
 # Read-only git actions que sub-agents podem chamar sem callback.
@@ -67,8 +71,29 @@ def _auto_approve_no_callback(name: str, args: dict) -> bool:
 
 def _load_subagent_prompt() -> str:
     if _SUBAGENT_PROMPT_PATH.exists():
-        return _SUBAGENT_PROMPT_PATH.read_text(encoding="utf-8")
+        raw = _SUBAGENT_PROMPT_PATH.read_text(encoding="utf-8")
+        return _strip_control_chars(raw)
     return "You are a focused sub-agent. Complete the delegated task using your tools."
+
+
+def _strip_control_chars(text: str) -> str:
+    """Remove control chars que sequestrariam o prompt do sub-agent.
+
+    Cobre NUL (`\\x00`), ANSI escape (`\\x1b`), e Unicode bidi overrides
+    (RLO/LRO/RLI/LRI/PDI). Sem isso, um arquivo subagent.md modificado
+    por atacante poderia esconder instrucoes via reordering visual ou
+    quebrar prompts via NUL byte.
+    """
+    # ASCII control: tudo abaixo de 0x20 exceto \t \n \r
+    forbidden = set(chr(c) for c in range(32) if c not in (9, 10, 13))
+    forbidden |= {"\x7f"}
+    # Unicode bidi/format overrides
+    forbidden |= {
+        "‪", "‫", "‬", "‭", "‮",  # LRE/RLE/PDF/LRO/RLO
+        "⁦", "⁧", "⁨", "⁩",            # LRI/RLI/FSI/PDI
+        "‎", "‏",                                # LRM/RLM
+    }
+    return "".join(c for c in text if c not in forbidden)
 
 
 def _new_agent_id() -> str:

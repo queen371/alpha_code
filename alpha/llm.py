@@ -15,6 +15,7 @@ from collections.abc import AsyncGenerator
 
 import httpx
 
+from ._security_log import sanitize_for_log
 from .config import LLM_TIMEOUT, get_provider_config
 
 logger = logging.getLogger(__name__)
@@ -223,8 +224,12 @@ async def stream_chat_with_tools(
                     # Non-retryable HTTP error
                     if response.status_code >= 400:
                         error_body = await response.aread()
+                        # Some providers echo back the request (incl. Authorization
+                        # header) in error responses — sanitize before logging.
+                        body_str = error_body.decode("utf-8", errors="replace")
                         logger.error(
-                            f"LLM HTTP {response.status_code}: {error_body[:500]}"
+                            f"LLM HTTP {response.status_code}: "
+                            f"{sanitize_for_log(body_str, max_chars=500)}"
                         )
                         yield {
                             "type": "final",
@@ -340,7 +345,7 @@ async def stream_chat_with_tools(
         except httpx.HTTPStatusError as e:
             body = ""
             try:
-                body = e.response.text[:500]
+                body = sanitize_for_log(e.response.text, max_chars=500)
             except (AttributeError, UnicodeDecodeError):
                 pass
             logger.error(f"LLM HTTP error: {e.response.status_code} | body: {body}")

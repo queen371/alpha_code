@@ -135,6 +135,10 @@ def validate_browser_url(url: str) -> str | None:
         return f"Esquema '{scheme}' não permitido (use http ou https)"
     if not parsed.hostname:
         return "URL sem hostname"
+    # userinfo (user:pass@host) e usado por phishing/SSRF para enganar o LLM:
+    # `https://github.com:fake-token@evil.com` parece github mas resolve evil.
+    if parsed.username or parsed.password:
+        return "URL com userinfo (user:pass@) não permitida"
     try:
         from ..net_utils import validate_url as _validate
 

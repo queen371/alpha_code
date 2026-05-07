@@ -1,5 +1,5 @@
 # STATUS DO PROJETO — Alpha Code
-> Ultima atualizacao: 2026-05-07 16:50
+> Ultima atualizacao: 2026-05-07 17:30
 > Atualizado por: Claude Code (status-update)
 
 ---
@@ -27,7 +27,8 @@ Nenhuma issue ALTO pendente. Todos os 14 ALTOs originais (V1.1 + DEEPs V2.0) fec
 
 | Commit | O que fechou |
 |--------|--------------|
-| (workdir 2026-05-07) | **Ultimos 7 V2.0 stragglers** — DEEP_LOGIC #DL016, DEEP_RESILIENCE #D020/#D021, DEEP_SECURITY #D107/#D110/#D111/#D112 (#D107 verificado como ja fechado via #D014-BUGS). 13 novos testes em `test_v2_stragglers.py`. |
+| (workdir 2026-05-07 17h) | **DEEP_SECURITY V1.0/V1.1 sprint** — #D012 + #D015 (sanitize Bearer/DSN via novo `_security_log.py`), #029 (html.unescape), #032 (block userinfo URL), #033 (strip control chars subagent.md), #034 (apify_run_actor → DESTRUCTIVE), #035 (wizard reject newline). +23 testes em `test_security_v10_v11_fixes.py`. |
+| `82f1291` | **Ultimos 7 V2.0 stragglers** — DEEP_LOGIC #DL016, DEEP_RESILIENCE #D020/#D021, DEEP_SECURITY #D107/#D110/#D111/#D112 (#D107 verificado como ja fechado via #D014-BUGS). 13 testes em `test_v2_stragglers.py`. |
 | `37aa292` | DEEP_MAINTAINABILITY V1.1 #DM002, #DM006, #DM008, #DM009, #DM010, #DM011, #DM013 (7 MEDIOs); #DM001 deferido |
 | `cf0958f` | feat(bin): wrapper `alpha-update` (one-command upgrade) |
 | `78b566d` | docs(readme): seção Update |
@@ -62,7 +63,7 @@ Nenhuma issue ALTO pendente. Todos os 14 ALTOs originais (V1.1 + DEEPs V2.0) fec
 | **DEEP_MAINTAINABILITY** | 7/8 + #DM001 deferido | #D001–#D013 (V1.0), #028, #030, #081, #082, #097, #DM003–#DM005, #DM007, #DM012, #DM014–#DM016, #083–#090 (~25) | [DEEP_MAINTAINABILITY](audits/current/DEEP_MAINTAINABILITY.md) |
 | **DEEP_PERFORMANCE** | 13/13 ✅ | #025/#071, #027/#072, #D005, #D007, #D008, #D009, #D010, #D012, #D020, #D022, #D025 (V1.0 cross-refs ~12) | [DEEP_PERFORMANCE](audits/current/DEEP_PERFORMANCE.md) |
 | **DEEP_RESILIENCE** | #D013–#D021 (9/9) ✅ | #066/#D006, #048, #053, #055, #056, #059, #060, #061, #051/#D012, #D008, #024, #014/#D009, #052, #054, #057, #058, #064, #065, #067, #D010 (~20) | [DEEP_RESILIENCE](audits/current/DEEP_RESILIENCE.md) |
-| **DEEP_SECURITY** | 12/12 ✅ | #D012/#D015 (V1.0 leaks), #019/#022, #023, #025/#026, #027, #032–#036, #028–#030, #033, #D014 (manifest plugins) (~16) | [DEEP_SECURITY](audits/current/DEEP_SECURITY.md) |
+| **DEEP_SECURITY** | 12/12 ✅ | #019/#022, #023, #025/#026, #027 (AST migration), #028 (safe_env TTL), #030 (multi-statement SQL), #036 (deps upper bound), #D014 (manifest plugins) (~9 restantes) | [DEEP_SECURITY](audits/current/DEEP_SECURITY.md) |
 
 > **Todos os V2.0 fechados.** Backlog restante e exclusivamente cross-refs V1.0/V1.1 herdadas que nunca foram fechadas em sprints anteriores (~70 issues distribuidas, todas BAIXO/MEDIO).
 
@@ -85,7 +86,9 @@ Nenhuma issue ALTO pendente. Todos os 14 ALTOs originais (V1.1 + DEEPs V2.0) fec
 
 ## SPRINT ATUAL
 
-**Concluido (2026-05-07):** Os ultimos 7 V2.0 stragglers fechados — #DL016, #D020-RES, #D021-RES, #D107 (verificado pre-fechado), #D110, #D111, #D112. Todos os 6 audits DEEP V2.0 zerados. +13 testes em `test_v2_stragglers.py`.
+**Concluido (2026-05-07 17h):** DEEP_SECURITY V1.0/V1.1 sprint — 7 issues fechadas (#D012, #D015, #029, #032, #033, #034, #035) via novo `alpha/_security_log.py` + 5 quick wins. +23 testes.
+
+**Antes (2026-05-07 16h):** Os ultimos 7 V2.0 stragglers fechados — #DL016, #D020-RES, #D021-RES, #D107 (verificado pre-fechado), #D110, #D111, #D112. Todos os 6 audits DEEP V2.0 zerados.
 
 ---
 
@@ -93,13 +96,14 @@ Nenhuma issue ALTO pendente. Todos os 14 ALTOs originais (V1.1 + DEEPs V2.0) fec
 
 Backlog agora e exclusivamente V1.0/V1.1 stragglers. Por valor:
 
-### Opcao A — DEEP_SECURITY V1.0/V1.1 (~16 abertas, maior risco residual)
-- [ ] #D012 — sanitizar Bearer/keys em error logs do llm.py (30min)
-- [ ] #D015 (V1.0) — sanitizar str(e) de asyncpg (DSN leak) (20min)
+### Opcao A — DEEP_SECURITY restantes (~9, mais densos)
 - [ ] #027 — migrar code_tools para AST allowlist (3h, resolve #D101 tambem)
-- [ ] #032 — bloquear userinfo em validate_browser_url (5min)
-- [ ] #034 — apify_run_actor para DESTRUCTIVE (5min)
-- [ ] #029, #030, #033, #035 — sanitizacoes diversas (~1h total)
+- [ ] #030 — multi-statement SQL detector trata `''` como escape (30min)
+- [ ] #028 — safe_env TTL/refresh (30min)
+- [ ] #019/#022 — marcar tool results como DATA + paths relativos (30min)
+- [ ] #023 — flag browser_require_allowlist conservadora (30min)
+- [ ] #036 — upper bound + lockfile (1h)
+- [ ] #D014 — manifest/hash signature em plugins/ (4h)
 
 ### Opcao B — DEEP_RESILIENCE V1.0/V1.1 (~20 abertas, maior backlog)
 - [ ] #066 / #D006 — messages cresce sem limite (30min)
@@ -124,8 +128,8 @@ Backlog agora e exclusivamente V1.0/V1.1 stragglers. Por valor:
 | Issues criticas pendentes | **0** |
 | Issues ALTO pendentes | **0** |
 | Issues V2.0 abertas (cross-deep) | **0** ✅ |
-| Issues V1.0/V1.1 stragglers | ~70 distribuidas (todas BAIXO/MEDIO) |
-| Suite de testes | **257/257** verde |
+| Issues V1.0/V1.1 stragglers | ~63 distribuidas (todas BAIXO/MEDIO) |
+| Suite de testes | **280/280** verde |
 | CI gate | Ativo (Py 3.11 + 3.12) |
 | MVP bloqueadores | Nao avaliado (sem MVP_PLAN) |
 
@@ -167,6 +171,7 @@ Nenhuma ADR registrada em `docs/decisions/`. Considere documentar:
 | 2026-05-06 | Sprint massivo de fixes: ALTOs do V1.1 + DEEPs V2.0 ALTOs/MEDIOs liquidados |
 | 2026-05-07 | DEEP_MAINTAINABILITY V2.0 fechado (7/8); `alpha-update` wrapper |
 | 2026-05-07 | **Ultimos 7 V2.0 stragglers fechados** — todos os 6 DEEPs V2.0 zerados (BUGS 9/9, LOGIC 9/9, MAINT 7/8 + DM001 deferido, PERF 13/13, RES 9/9, SEC 12/12). Suite 244 → 257 |
+| 2026-05-07 | **DEEP_SECURITY V1.0/V1.1 sprint** — 7 issues fechadas via `_security_log.py` + quick wins. Suite 257 → 280 |
 
 ---
 

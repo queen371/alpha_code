@@ -13,6 +13,7 @@ import sqlite3
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .._security_log import sanitize_for_log
 from ..net_utils import is_private_ip as _is_private_ip
 from . import ToolDefinition, ToolSafety, register_tool
 from .workspace import AGENT_WORKSPACE
@@ -240,7 +241,8 @@ async def _query_database(
         except TimeoutError:
             return {"error": "Timeout ao conectar ao PostgreSQL"}
         except Exception as e:
-            return {"error": f"PostgreSQL error: {e}"}
+            # asyncpg errors podem incluir o DSN com password no str(e).
+            return {"error": sanitize_for_log(f"PostgreSQL error: {e}")}
 
     return {"error": f"Tipo de banco '{db_type}' não suportado. Use 'sqlite' ou 'postgresql'."}
 
@@ -314,7 +316,8 @@ async def _describe_table(connection: str, table: str, db_type: str = "sqlite") 
         except TimeoutError:
             return {"error": "Timeout ao conectar ao PostgreSQL"}
         except Exception as e:
-            return {"error": f"PostgreSQL error: {e}"}
+            # asyncpg errors podem incluir o DSN com password no str(e).
+            return {"error": sanitize_for_log(f"PostgreSQL error: {e}")}
 
     return {"error": f"Tipo de banco '{db_type}' não suportado"}
 

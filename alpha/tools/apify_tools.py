@@ -200,7 +200,9 @@ register_tool(
             },
             "required": ["actor_id"],
         },
-        safety=ToolSafety.SAFE,
+        # Actor arbitrario com input arbitrario = exfil/SSRF indireto via
+        # actors maliciosos no marketplace. Requer aprovacao humana.
+        safety=ToolSafety.DESTRUCTIVE,
         executor=_run_actor,
         category="scraping",
     )

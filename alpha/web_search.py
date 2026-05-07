@@ -250,9 +250,17 @@ _RE_WS = re.compile(r"\s+")
 
 
 def _strip_html(html: str) -> str:
-    """Remove tags HTML e colapsa whitespace."""
+    """Remove tags HTML e colapsa whitespace.
+
+    `html.unescape` decodifica entidades (&amp; &lt; &#39; etc) que sobravam
+    como literais no texto extraido — atrapalhava grep e injetava ruido em
+    extracoes que viravam input do LLM (#029).
+    """
+    import html as _html
+
     html = _RE_SCRIPT_STYLE.sub("", html)
     text = _RE_TAGS.sub(" ", html)
+    text = _html.unescape(text)
     return _RE_WS.sub(" ", text).strip()
 
 

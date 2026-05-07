@@ -28,7 +28,14 @@ def read_env() -> dict[str, str]:
 
 
 def write_env(updates: dict[str, str]) -> Path:
-    """Merge updates into .env. Existing keys are updated in place."""
+    """Merge updates into .env. Existing keys are updated in place.
+
+    Rejeita values com `\\n`/`\\r` para evitar injecao de chaves via input
+    de usuario malicioso (e.g. `OPENAI_API_KEY=valid\\nDEEPSEEK_API_KEY=evil`).
+    """
+    for k, v in updates.items():
+        if "\n" in v or "\r" in v:
+            raise ValueError(f"Newline em valor de '{k}' — bloqueado por segurança")
     existing = (
         ENV_PATH.read_text(encoding="utf-8").splitlines()
         if ENV_PATH.exists()
