@@ -24,6 +24,14 @@ async def _run_tool(name: str, *, timeout: float | None = None, **kwargs) -> dic
     _SLOW_TOOL_TIMEOUT para tools registradas como slow). Sem isso, sub-tools
     da composite hangam indefinidamente — o timeout do agent so corta apos
     o cap do composite (300s), nao o do sub-tool.
+
+    TRUST MODEL (#D110): este helper invoca tools internas SEM passar pelo
+    gate de aprovacao do executor. A composite tool externa ja foi aprovada
+    pelo usuario (todas as composites destrutivas sao DESTRUCTIVE). As
+    sub-tools chamadas aqui ainda passam pelas suas proprias validacoes
+    (workspace, command allowlist, schema), mas nao re-prompto. Nao chame
+    `_run_tool` com tool destrutiva sem garantir que a composite externa
+    seja DESTRUCTIVE — caso contrario o gate fica opaco para o usuario.
     """
     from ..executor import (
         TOOL_EXECUTION_TIMEOUT,

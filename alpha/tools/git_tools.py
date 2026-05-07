@@ -98,6 +98,12 @@ async def _run_git(args: list[str], cwd: str, timeout: int | None = None) -> dic
             proc.kill()
             await proc.wait()
             return {"error": f"git excedeu timeout de {timeout}s", "timeout": True}
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            # Ctrl+C durante `git push`/`git fetch` deixaria o processo
+            # rodando ate completar a transferencia. Mata e propaga.
+            proc.kill()
+            await proc.wait()
+            raise
 
         return {
             "exit_code": proc.returncode,
@@ -174,6 +180,20 @@ def _sanitize_git_args(action: str, args: str) -> tuple[list[str], str | None]:
     return parts, None
 
 
+def _reject_dash_prefixed(label: str, value: str) -> str | None:
+    """Bloqueia values comecando com '-' que git interpretaria como flag.
+
+    Sem isso, `branch="--detach"` em checkout vira flag (descartando local
+    changes); `message="--amend"` em commit reescreve o ultimo commit;
+    `files=["--exec=evil"]` em add executa hooks. subprocess_exec ja
+    previne shell injection, mas nao protege contra arg-injection no
+    proprio git.
+    """
+    if value and value.startswith("-"):
+        return f"{label} não pode começar com '-' (interpretado como flag git): {value!r}"
+    return None
+
+
 async def _git_operation(
     action: str,
     path: str = None,
@@ -190,6 +210,20 @@ async def _git_operation(
             "error": f"Ação git '{action}' não reconhecida. "
             f"Ações disponíveis: {', '.join(sorted(_ALL_ACTIONS))}",
         }
+
+    if branch is not None:
+        err = _reject_dash_prefixed("branch", branch)
+        if err:
+            return {"error": err}
+    if message is not None:
+        err = _reject_dash_prefixed("message", message)
+        if err:
+            return {"error": err}
+    if files:
+        for f in files:
+            err = _reject_dash_prefixed("files[]", f)
+            if err:
+                return {"error": err}
 
     # Resolve repo path
     if path:

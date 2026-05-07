@@ -239,6 +239,10 @@ async def _execute_shell(command: str, cwd: str = None, timeout: int | None = No
                         "error": f"Comando excedeu o timeout de {timeout}s",
                         "timeout": True,
                     }
+                except (asyncio.CancelledError, KeyboardInterrupt):
+                    proc.kill()
+                    await proc.wait()
+                    raise
                 prev_output = stdout
                 all_stderr += stderr
                 last_returncode = proc.returncode
@@ -265,6 +269,13 @@ async def _execute_shell(command: str, cwd: str = None, timeout: int | None = No
                     "error": f"Comando excedeu o timeout de {timeout}s",
                     "timeout": True,
                 }
+            except (asyncio.CancelledError, KeyboardInterrupt):
+                # Sem este bloco, Ctrl+C deixa o subprocess rodando ate o
+                # fim (ex: `git push` ou `npm install` continua exfiltrando
+                # apesar do REPL ter "cancelado").
+                proc.kill()
+                await proc.wait()
+                raise
 
             return {
                 "exit_code": proc.returncode,

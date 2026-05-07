@@ -242,6 +242,8 @@ async def _delegate_task(
     provider: str = "",
 ) -> dict:
     """Spawn a single sub-agent to handle a task."""
+    if not FEATURES.get("multi_agent_enabled"):
+        return {"error": "Multi-agent system is disabled. Set FEATURES['multi_agent_enabled']=True."}
     if not FEATURES.get("delegate_tool_enabled"):
         return {"error": "Delegate tool is disabled. Enable 'delegate_tool_enabled' in config."}
     return await _run_subagent(task, context, tools_filter, provider)
@@ -256,6 +258,8 @@ async def _delegate_parallel(
     provider: str = "",
 ) -> dict:
     """Spawn multiple sub-agents in parallel, each handling one task."""
+    if not FEATURES.get("multi_agent_enabled"):
+        return {"error": "Multi-agent system is disabled. Set FEATURES['multi_agent_enabled']=True."}
     if not FEATURES.get("delegate_tool_enabled"):
         return {"error": "Delegate tool is disabled. Enable 'delegate_tool_enabled' in config."}
 

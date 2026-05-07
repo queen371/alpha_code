@@ -71,16 +71,30 @@ class BrowserSession:
                     "Playwright not installed. Run: "
                     "pip install playwright && playwright install chromium"
                 )
+            # Constroi tudo em locais antes de atribuir a self — se launch()
+            # ou new_context() falhar, paramos o playwright e a instancia
+            # fica num estado limpo. Sem isto, falhas de launch acumulam
+            # 1 runtime por tentativa (combina com #054 close-leak).
+            pw = await async_playwright().start()
+            try:
+                browser = await pw.chromium.launch(headless=headless)
+                context = await browser.new_context(
+                    user_agent="ALPHA-Browser/1.0",
+                    viewport={"width": 1280, "height": 800},
+                    accept_downloads=False,
+                    java_script_enabled=True,
+                )
+                page = await context.new_page()
+            except Exception:
+                try:
+                    await pw.stop()
+                except Exception as cleanup_err:
+                    logger.warning(f"playwright stop failed during cleanup: {cleanup_err}")
+                raise
             self.headless = headless
-            self.playwright = await async_playwright().start()
-            self.browser = await self.playwright.chromium.launch(headless=headless)
-            self.context = await self.browser.new_context(
-                user_agent="ALPHA-Browser/1.0",
-                viewport={"width": 1280, "height": 800},
-                accept_downloads=False,
-                java_script_enabled=True,
-            )
-            page = await self.context.new_page()
+            self.playwright = pw
+            self.browser = browser
+            self.context = context
             self.pages = [page]
             self.active_idx = 0
             self.context.on("page", self._on_new_page)

@@ -223,6 +223,12 @@ async def _execute_python(code: str, timeout: int | None = None) -> dict:
                 "error": f"Execução excedeu o timeout de {timeout}s",
                 "timeout": True,
             }
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            # Sem este bloco, Ctrl+C durante codigo Python longo deixa o
+            # subprocess rodando ate o fim (loop infinito, fork bomb leve).
+            proc.kill()
+            await proc.wait()
+            raise
 
         return {
             "exit_code": proc.returncode,

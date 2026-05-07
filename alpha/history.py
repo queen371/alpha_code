@@ -9,6 +9,7 @@ Supports session summaries for quick resume and context continuity.
 import json
 import logging
 import os
+import secrets
 import time
 from pathlib import Path
 
@@ -59,8 +60,13 @@ def _session_path(session_id: str) -> Path:
 
 
 def generate_session_id() -> str:
-    """Generate a unique session ID based on timestamp."""
-    return time.strftime("%Y%m%d_%H%M%S")
+    """Generate a unique session ID: timestamp + random suffix.
+
+    Sufixo de 8 hex evita colisao quando dois agents/REPLs (ou parent+sub-agent)
+    sao iniciados no mesmo segundo — sem o sufixo, o segundo `save_session`
+    sobrescreve o primeiro silenciosamente, perdendo auditoria/forense.
+    """
+    return f"{time.strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(4)}"
 
 
 def _build_session_summary(messages: list[dict]) -> str:

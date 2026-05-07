@@ -146,11 +146,16 @@ def load_system_prompt() -> str:
 # o Path real. Importe direto de `alpha.tools.workspace`.
 
 # ─── Feature Flags (used by tool modules) ───
+# Toda chave aqui DEVE ser lida em algum lugar. Flags orfas viram codigo
+# morto que confunde quem tenta desabilitar comportamento via env e nao
+# ve efeito (#DL016).
 FEATURES: dict = {
-    "sandbox_enabled": False,
+    # Master switch para o sistema de sub-agents. Quando False, `delegate_task`
+    # e `delegate_parallel` retornam erro mesmo que `delegate_tool_enabled=True`.
+    # Lido em `delegate_tools._delegate_task` / `_delegate_parallel`.
     "multi_agent_enabled": True,
+    # Gate fino sobre as tools de delegate (independente do master switch).
     "delegate_tool_enabled": True,
-    "auto_delegate_parallel_groups": False,
     "max_parallel_agents": 3,
     "subagent_max_iterations": 15,
     # Cap total de tarefas em delegate_parallel — `max_parallel_agents`

@@ -19,8 +19,15 @@ class TestHistory:
 
     def test_generate_session_id(self):
         sid = generate_session_id()
-        assert len(sid) == 15  # YYYYMMDD_HHMMSS
-        assert "_" in sid
+        # YYYYMMDD_HHMMSS_xxxxxxxx (15 + 1 + 8 = 24)
+        assert len(sid) == 24
+        # Dois underscores: timestamp <-> hex suffix
+        assert sid.count("_") == 2
+
+    def test_generate_session_id_unique_in_same_second(self):
+        # Sufixo aleatorio garante unicidade mesmo com mesma timestamp.
+        ids = {generate_session_id() for _ in range(50)}
+        assert len(ids) == 50
 
     def test_save_and_load(self):
         messages = [

@@ -131,5 +131,5 @@ Sub-agents are blocked from calling `delegate_task` / `delegate_parallel` (no re
 - Sub-agent prompt lives in `prompts/subagent.md`.
 - UI strings are in Portuguese (approval prompts, banner).
 - Workspace defaults to CWD (`alpha/tools/workspace.py`).
-- Static config flags live in `config.py` (`multi_agent_enabled`, `delegate_tool_enabled`, `sandbox_enabled`); user-overridable behavior (permissions, hooks) lives in `.alpha/settings.json`; MCP servers in `.alpha/mcp.json`. `.example` templates ship in `.alpha/` for both.
+- Static config flags live in `config.py` (`multi_agent_enabled`, `delegate_tool_enabled`); user-overridable behavior (permissions, hooks) lives in `.alpha/settings.json`; MCP servers in `.alpha/mcp.json`. `.example` templates ship in `.alpha/` for both.
 - CI runs `pytest` on Python 3.11 + 3.12 via `.github/workflows/ci.yml` on every PR and push to master.
