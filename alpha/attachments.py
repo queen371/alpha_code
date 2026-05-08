@@ -68,12 +68,17 @@ def _read_image(path: Path) -> tuple[bytes, str] | None:
     return data, _media_type_for_path(path)
 
 
-def build_user_content(text: str, image_paths: list[Path]) -> str | list[dict]:
+def build_user_content(
+    text: str,
+    image_paths: list[Path],
+    vision_format: str = "openai",
+) -> str | list[dict]:
     """Return content suitable for `messages.append({"role": "user", "content": ...})`.
 
     With no images, returns the original text string (backward-compat).
-    With images, returns an OpenAI-shaped content list. The Anthropic
-    adapter translates this list when it converts messages.
+    With images, returns a content list shaped per `vision_format`:
+      - "openai":    {type: "image_url", image_url: {url: "data:..."}}
+      - "anthropic": {type: "image", source: {type: "base64", media_type, data}}
     """
     if not image_paths:
         return text
@@ -88,19 +93,28 @@ def build_user_content(text: str, image_paths: list[Path]) -> str | list[dict]:
             continue
         data, media_type = loaded
         b64 = base64.b64encode(data).decode("ascii")
-        blocks.append(
-            {
-                "type": "image_url",
-                "image_url": {"url": f"data:{media_type};base64,{b64}"},
-            }
-        )
+        if vision_format == "anthropic":
+            blocks.append(
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": b64,
+                    },
+                }
+            )
+        else:
+            blocks.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{media_type};base64,{b64}"},
+                }
+            )
 
     if len(blocks) == 0:
-        # All images failed to load and there was no text — return empty text
-        # rather than an empty list (which most providers reject).
         return ""
     if len(blocks) == 1 and blocks[0]["type"] == "text":
-        # Only text survived — use the string form for normal-path compat.
         return blocks[0]["text"]
     return blocks
 

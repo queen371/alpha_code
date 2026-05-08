@@ -53,6 +53,7 @@ _PROVIDERS = {
         "model_env": "DEEPSEEK_MODEL",
         "default_model": "deepseek-v4-pro",
         "supports_vision": True,
+        "vision_format": "anthropic",
     },
     "openai": {
         "base_url": os.getenv("OPENAI_API_BASE_URL", "https://api.openai.com/v1"),
@@ -134,6 +135,7 @@ def get_provider_config(provider: str) -> dict:
     supports_tools = cfg.get("supports_tools", True)
     api_format = cfg.get("api_format", "openai")
     supports_vision = cfg.get("supports_vision", False)
+    vision_format = cfg.get("vision_format", "openai")
 
     return {
         "base_url": base_url,
@@ -142,6 +144,7 @@ def get_provider_config(provider: str) -> dict:
         "supports_tools": supports_tools,
         "api_format": api_format,
         "supports_vision": supports_vision,
+        "vision_format": vision_format,
     }
 
 

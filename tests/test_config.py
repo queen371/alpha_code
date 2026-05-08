@@ -61,3 +61,13 @@ class TestProviderVisionFlag:
     def test_ollama_does_not_support_vision_by_default(self):
         cfg = get_provider_config("ollama")
         assert cfg["supports_vision"] is False
+
+    def test_deepseek_uses_anthropic_vision_format(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test")
+        cfg = get_provider_config("deepseek")
+        assert cfg["vision_format"] == "anthropic"
+
+    def test_openai_uses_openai_vision_format_default(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test")
+        cfg = get_provider_config("openai")
+        assert cfg["vision_format"] == "openai"

@@ -269,7 +269,9 @@ def run_repl(provider: str, temperature: float):
                 f"(ex: openai, anthropic) ou descreva o conteudo textualmente."
             )
             image_paths = []
-        user_content = build_user_content(contextualized, image_paths)
+        user_content = build_user_content(
+            contextualized, image_paths, vision_format=cfg.get("vision_format", "openai")
+        )
         if image_paths:
             print(c(C.GRAY, f"  ({len(image_paths)} image(s) attached)"))
 

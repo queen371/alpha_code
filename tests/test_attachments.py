@@ -38,6 +38,22 @@ class TestBuildUserContent:
         assert isinstance(out, list)
         assert out[0] == {"type": "text", "text": "describe"}
         assert out[1]["type"] == "image_url"
+
+    def test_with_image_anthropic_format(self, png_path: Path):
+        out = build_user_content("describe", [png_path], vision_format="anthropic")
+        assert isinstance(out, list)
+        assert out[0] == {"type": "text", "text": "describe"}
+        assert out[1]["type"] == "image"
+        assert out[1]["source"]["type"] == "base64"
+        assert out[1]["source"]["media_type"] == "image/png"
+        decoded = base64.b64decode(out[1]["source"]["data"])
+        assert decoded == _TINY_PNG
+        assert "image_url" not in out[1]
+
+    def test_with_image_openai_format_explicit(self, png_path: Path):
+        out = build_user_content("describe", [png_path], vision_format="openai")
+        assert isinstance(out, list)
+        assert out[1]["type"] == "image_url"
         url = out[1]["image_url"]["url"]
         assert url.startswith("data:image/png;base64,")
         decoded = base64.b64decode(url.split(",", 1)[1])
