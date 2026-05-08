@@ -178,6 +178,15 @@ async def stream_chat_with_tools(
 
     for attempt in range(MAX_RETRIES + 1):
         accumulated_content = ""
+        # `reasoning_content` e o canal de "thinking" do DeepSeek-reasoner
+        # (e tambem dos `gpt-oss` no Ollama). A API exige que o campo
+        # acumulado da resposta seja devolvido na turn seguinte, ou
+        # responde HTTP 400 "The `reasoning_content` in the thinking mode
+        # must be passed back to the API." Sem isso, qualquer iteracao
+        # com tool_call quebra. Provedores que nao usam thinking simplesmente
+        # nunca emitem o campo, entao guardamos None e nao adicionamos
+        # ao message dict.
+        accumulated_reasoning = ""
         tool_calls_acc: dict[int, dict] = {}
 
         try:
@@ -261,6 +270,14 @@ async def stream_chat_with_tools(
                                 accumulated_content += content
                                 yield {"type": "content_token", "token": content}
 
+                            # Thinking tokens (DeepSeek-reasoner). Acumulados
+                            # silenciosamente — nao streamamos para o usuario
+                            # porque o formato e ruidoso e nao reflete a
+                            # resposta final, mas precisam voltar pro provider.
+                            reasoning = delta.get("reasoning_content", "")
+                            if reasoning:
+                                accumulated_reasoning += reasoning
+
                             # Tool calls (streamed incrementally)
                             if delta.get("tool_calls"):
                                 for tc_delta in delta["tool_calls"]:
@@ -289,6 +306,7 @@ async def stream_chat_with_tools(
                             continue
 
             # Success — build final event and return
+            reasoning_out = accumulated_reasoning or None
             if tool_calls_acc:
                 tool_calls = [
                     {"id": tc["id"], "name": tc["name"], "arguments": tc["arguments"]}
@@ -298,6 +316,7 @@ async def stream_chat_with_tools(
                     "type": "final",
                     "content": accumulated_content,
                     "tool_calls": tool_calls,
+                    "reasoning_content": reasoning_out,
                     "error": None,
                 }
             else:
@@ -313,6 +332,7 @@ async def stream_chat_with_tools(
                         "type": "final",
                         "content": "",
                         "tool_calls": [recovered],
+                        "reasoning_content": reasoning_out,
                         "error": None,
                     }
                 else:
@@ -320,6 +340,7 @@ async def stream_chat_with_tools(
                         "type": "final",
                         "content": accumulated_content,
                         "tool_calls": [],
+                        "reasoning_content": reasoning_out,
                         "error": None,
                     }
             return  # success, no retry

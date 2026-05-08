@@ -388,9 +388,13 @@ async def run_agent(
             # wanted as raw text (XML/JSON) — visible as `<invoke>` blocks
             # leaking to the terminal.
             if final_event.get("content"):
-                messages.append(
-                    {"role": "assistant", "content": final_event["content"]}
-                )
+                forced_msg: dict = {
+                    "role": "assistant",
+                    "content": final_event["content"],
+                }
+                if final_event.get("reasoning_content"):
+                    forced_msg["reasoning_content"] = final_event["reasoning_content"]
+                messages.append(forced_msg)
             # Usar role=user em vez de system: providers como OpenAI strict
             # mode e alguns Ollama models rejeitam/ignoram system message
             # tardia, alem de competir com a system message original em
@@ -440,7 +444,9 @@ async def run_agent(
         # Process tool calls
         messages.append(
             build_assistant_tool_message(
-                final_event["content"], final_event["tool_calls"]
+                final_event["content"],
+                final_event["tool_calls"],
+                final_event.get("reasoning_content"),
             )
         )
 

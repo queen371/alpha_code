@@ -33,10 +33,19 @@ def _no_deny(_tool: str, _args: dict) -> tuple[bool, str]:
 
 
 def build_assistant_tool_message(
-    content: str | None, tool_calls: list[dict]
+    content: str | None,
+    tool_calls: list[dict],
+    reasoning_content: str | None = None,
 ) -> dict:
-    """Build an OpenAI-compatible assistant message containing tool_calls."""
-    return {
+    """Build an OpenAI-compatible assistant message containing tool_calls.
+
+    `reasoning_content` (DeepSeek-reasoner thinking-mode tokens) deve ser
+    devolvido na proxima request ou o provider responde HTTP 400. Quando
+    nao usado (qualquer outro modelo), o caller passa None e o campo nao
+    e adicionado — providers que nao reconhecem o campo simplesmente
+    ignoram, mas omitir e mais limpo.
+    """
+    msg: dict = {
         "role": "assistant",
         "content": content or None,
         "tool_calls": [
@@ -51,6 +60,9 @@ def build_assistant_tool_message(
             for tc in tool_calls
         ],
     }
+    if reasoning_content:
+        msg["reasoning_content"] = reasoning_content
+    return msg
 
 
 _PREVIEW_FIELD_MAX = 1000
