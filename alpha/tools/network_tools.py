@@ -34,6 +34,40 @@ _HTTP_MAX_RETRIES = 2  # ate 3 tentativas no total
 _HTTP_INITIAL_BACKOFF = 0.5
 
 
+# #D008-PERF: aiohttp.ClientSession compartilhada por loop. Antes, cada
+# `http_request` criava uma session nova (com connector pool, DNS cache,
+# SSL context vazio) e fechava no fim. Cost amortizado se varias chamadas
+# rodam sequencialmente — keep-alive das conexoes TCP resta valido por
+# 75s default no aiohttp. Loop-aware pelo mesmo motivo de llm.py: single-shot
+# CLI cria loop novo a cada invocacao mas o modulo persiste em cache.
+_shared_aiohttp_session = None  # type: ignore[var-annotated]
+_aiohttp_session_loop: object | None = None
+
+
+async def _get_shared_aiohttp_session():
+    """Lazy + loop-aware singleton de `aiohttp.ClientSession`."""
+    global _shared_aiohttp_session, _aiohttp_session_loop
+    import aiohttp
+
+    loop = asyncio.get_running_loop()
+    if (
+        _shared_aiohttp_session is None
+        or _shared_aiohttp_session.closed
+        or _aiohttp_session_loop is not loop
+    ):
+        if (
+            _shared_aiohttp_session is not None
+            and not _shared_aiohttp_session.closed
+        ):
+            try:
+                await _shared_aiohttp_session.close()
+            except Exception:
+                pass
+        _shared_aiohttp_session = aiohttp.ClientSession()
+        _aiohttp_session_loop = loop
+    return _shared_aiohttp_session
+
+
 def _rewrite_url_with_ip(parsed, resolved_ip: str) -> str:
     """Reconstroi URL trocando hostname pelo IP resolvido.
 
@@ -73,7 +107,7 @@ async def _http_request(
     timeout = min(timeout, 60)
 
     try:
-        import aiohttp
+        import aiohttp  # noqa: F401 — usado por aiohttp.ClientTimeout abaixo
 
         req_headers = dict(headers) if headers else {}
         req_headers.setdefault("User-Agent", "ALPHA-Agent/1.0")
@@ -97,101 +131,101 @@ async def _http_request(
         is_https = parsed.scheme == "https"
         ssl_param = _ssl.create_default_context() if is_https else False
 
-        async with aiohttp.ClientSession() as session:
-            req_data = None
-            if body and method in ("POST", "PUT", "PATCH"):
-                content_type = req_headers.get("Content-Type", "")
-                if "json" in content_type or (body.startswith("{") or body.startswith("[")):
-                    req_headers.setdefault("Content-Type", "application/json")
-                req_data = body
+        session = await _get_shared_aiohttp_session()
+        req_data = None
+        if body and method in ("POST", "PUT", "PATCH"):
+            content_type = req_headers.get("Content-Type", "")
+            if "json" in content_type or (body.startswith("{") or body.startswith("[")):
+                req_headers.setdefault("Content-Type", "application/json")
+            req_data = body
 
-            req_kwargs = dict(
-                method=method,
-                url=fixed_url,
-                headers=req_headers,
-                data=req_data,
-                allow_redirects=False,  # NÃO seguir automaticamente
-                timeout=aiohttp.ClientTimeout(total=timeout),
-                ssl=ssl_param,
+        req_kwargs = dict(
+            method=method,
+            url=fixed_url,
+            headers=req_headers,
+            data=req_data,
+            allow_redirects=False,  # NÃO seguir automaticamente
+            timeout=aiohttp.ClientTimeout(total=timeout),
+            ssl=ssl_param,
+        )
+        if is_https:
+            req_kwargs["server_hostname"] = hostname
+        resp = await session.request(**req_kwargs)
+
+        # Manual redirect following com re-validação DNS+IP
+        redirect_count = 0
+        while resp.status in (301, 302, 303, 307, 308) and redirect_count < 5:
+            redirect_url = resp.headers.get("Location")
+            if not redirect_url:
+                break
+
+            # Resolver URL relativo
+            if redirect_url.startswith("/"):
+                port = parsed.port
+                port_str = f":{port}" if port else ""
+                redirect_url = f"{parsed.scheme}://{hostname}{port_str}{redirect_url}"
+
+            # Re-validar DNS + IP do destino do redirect
+            redirect_parsed = urlparse(redirect_url)
+            redirect_hostname = redirect_parsed.hostname
+            if not redirect_hostname:
+                break
+
+            try:
+                redirect_ip = await _resolve_and_validate(redirect_hostname)
+            except ValueError as e:
+                return {"error": f"Redirect bloqueado: {e}", "blocked": True}
+
+            fixed_redirect = _rewrite_url_with_ip(redirect_parsed, redirect_ip)
+            req_headers["Host"] = redirect_hostname
+
+            redirect_is_https = redirect_parsed.scheme == "https"
+            redirect_ssl = (
+                _ssl.create_default_context() if redirect_is_https else False
             )
-            if is_https:
-                req_kwargs["server_hostname"] = hostname
-            resp = await session.request(**req_kwargs)
+            redirect_kwargs = dict(
+                method=method,
+                url=fixed_redirect,
+                headers=req_headers,
+                allow_redirects=False,
+                timeout=aiohttp.ClientTimeout(total=timeout),
+                ssl=redirect_ssl,
+            )
+            if redirect_is_https:
+                redirect_kwargs["server_hostname"] = redirect_hostname
+            resp = await session.request(**redirect_kwargs)
+            redirect_count += 1
 
-            # Manual redirect following com re-validação DNS+IP
-            redirect_count = 0
-            while resp.status in (301, 302, 303, 307, 308) and redirect_count < 5:
-                redirect_url = resp.headers.get("Location")
-                if not redirect_url:
-                    break
+        # Read response with size limit
+        raw = await resp.read()
+        if len(raw) > _MAX_RESPONSE_SIZE:
+            body_text = raw[:_MAX_RESPONSE_SIZE].decode(errors="replace")
+            body_text += f"\n... [truncado: resposta > {_MAX_RESPONSE_SIZE // 1000}KB]"
+        else:
+            body_text = raw.decode(errors="replace")
 
-                # Resolver URL relativo
-                if redirect_url.startswith("/"):
-                    port = parsed.port
-                    port_str = f":{port}" if port else ""
-                    redirect_url = f"{parsed.scheme}://{hostname}{port_str}{redirect_url}"
+        resp_headers = dict(resp.headers)
 
-                # Re-validar DNS + IP do destino do redirect
-                redirect_parsed = urlparse(redirect_url)
-                redirect_hostname = redirect_parsed.hostname
-                if not redirect_hostname:
-                    break
-
-                try:
-                    redirect_ip = await _resolve_and_validate(redirect_hostname)
-                except ValueError as e:
-                    return {"error": f"Redirect bloqueado: {e}", "blocked": True}
-
-                fixed_redirect = _rewrite_url_with_ip(redirect_parsed, redirect_ip)
-                req_headers["Host"] = redirect_hostname
-
-                redirect_is_https = redirect_parsed.scheme == "https"
-                redirect_ssl = (
-                    _ssl.create_default_context() if redirect_is_https else False
+        return {
+            "status_code": resp.status,
+            "headers": {
+                k: v
+                for k, v in resp_headers.items()
+                if k.lower()
+                in (
+                    "content-type",
+                    "content-length",
+                    "server",
+                    "date",
+                    "location",
+                    "x-request-id",
+                    "etag",
                 )
-                redirect_kwargs = dict(
-                    method=method,
-                    url=fixed_redirect,
-                    headers=req_headers,
-                    allow_redirects=False,
-                    timeout=aiohttp.ClientTimeout(total=timeout),
-                    ssl=redirect_ssl,
-                )
-                if redirect_is_https:
-                    redirect_kwargs["server_hostname"] = redirect_hostname
-                resp = await session.request(**redirect_kwargs)
-                redirect_count += 1
-
-            # Read response with size limit
-            raw = await resp.read()
-            if len(raw) > _MAX_RESPONSE_SIZE:
-                body_text = raw[:_MAX_RESPONSE_SIZE].decode(errors="replace")
-                body_text += f"\n... [truncado: resposta > {_MAX_RESPONSE_SIZE // 1000}KB]"
-            else:
-                body_text = raw.decode(errors="replace")
-
-            resp_headers = dict(resp.headers)
-
-            return {
-                "status_code": resp.status,
-                "headers": {
-                    k: v
-                    for k, v in resp_headers.items()
-                    if k.lower()
-                    in (
-                        "content-type",
-                        "content-length",
-                        "server",
-                        "date",
-                        "location",
-                        "x-request-id",
-                        "etag",
-                    )
-                },
-                "body": body_text[:15000],
-                "url": str(resp.url),
-                "method": method,
-            }
+            },
+            "body": body_text[:15000],
+            "url": str(resp.url),
+            "method": method,
+        }
 
     except ImportError:
         # Fallback: use urllib (stdlib)

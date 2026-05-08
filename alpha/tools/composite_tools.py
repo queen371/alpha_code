@@ -8,10 +8,24 @@ SECURITY: Each step in a composite tool uses the existing tool security model.
 
 import asyncio
 import logging
+import os
 import re
+import shlex
 from pathlib import Path
 
+# #D009: imports promovidos pra topo. Antes viviam inline em `_run_tool`,
+# `_run_tests`, `_search_and_replace` — convencao incorreta (PEP 8) e
+# escondia dependencia transitiva (audit/IDE precisa abrir cada funcao
+# pra ver o que realmente importamos). Nao ha ciclo: alpha.executor e
+# alpha.tools.file_tools sao importados antes deste modulo durante o
+# `_discover_builtin_tools` de tools/__init__.py.
+from ..executor import (
+    TOOL_EXECUTION_TIMEOUT,
+    _SLOW_TOOL_TIMEOUT,
+    _SLOW_TOOLS,
+)
 from . import ToolDefinition, ToolSafety, get_tool, register_tool
+from .file_tools import _validate_path_no_symlink
 from .workspace import AGENT_WORKSPACE
 
 logger = logging.getLogger(__name__)
@@ -33,12 +47,6 @@ async def _run_tool(name: str, *, timeout: float | None = None, **kwargs) -> dic
     `_run_tool` com tool destrutiva sem garantir que a composite externa
     seja DESTRUCTIVE — caso contrario o gate fica opaco para o usuario.
     """
-    from ..executor import (
-        TOOL_EXECUTION_TIMEOUT,
-        _SLOW_TOOL_TIMEOUT,
-        _SLOW_TOOLS,
-    )
-
     tool_def = get_tool(name)
     if not tool_def:
         return {"error": f"Tool '{name}' não encontrada no registry"}
@@ -168,8 +176,7 @@ async def _run_tests(
         if pattern:
             # #090: shlex.quote evita quebra com pattern contendo aspas/espacos.
             # Antes: f" -k '{pattern}'" — pattern="foo'bar" gerava cmd invalido.
-            import shlex as _shlex
-            cmd += f" -k {_shlex.quote(pattern)}"
+            cmd += f" -k {shlex.quote(pattern)}"
     elif framework == "npm":
         cmd = "npm test"
     elif framework == "cargo":
@@ -240,8 +247,6 @@ async def _search_and_replace(
     # 500 read + 500 write para arquivos com muitas ocorrencias (#D024-PERF).
     # Reuso `_validate_path_no_symlink` de file_tools para preservar a
     # validacao defense-in-depth.
-    import os
-    from .file_tools import _validate_path_no_symlink
 
     changed_files = []
     errors = []

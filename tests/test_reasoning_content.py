@@ -67,12 +67,16 @@ class _FakeStreamResponse:
 class _FakeAsyncClient:
     def __init__(self, response: _FakeStreamResponse):
         self._response = response
+        self.is_closed = False
 
     async def __aenter__(self):
         return self
 
     async def __aexit__(self, *_):
         return False
+
+    async def aclose(self):
+        self.is_closed = True
 
     @asynccontextmanager
     async def stream(self, *_args, **_kwargs):
@@ -83,9 +87,26 @@ def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload)}"
 
 
+@pytest.fixture
+def _reset_shared_llm_client():
+    """Os testes monkeypatcham `httpx.AsyncClient` para devolver um fake.
+    Como o cliente real e cacheado em `_shared_llm_client` (#026/#076),
+    precisamos limpar o singleton entre testes — caso contrario o segundo
+    teste reusa o fake do primeiro (e os fakes sao stateful)."""
+    from alpha import llm
+
+    llm._shared_llm_client = None
+    llm._llm_client_loop = None
+    yield
+    llm._shared_llm_client = None
+    llm._llm_client_loop = None
+
+
 @pytest.mark.asyncio
 class TestStreamReasoningContent:
-    async def test_reasoning_collected_and_emitted_in_final(self, monkeypatch):
+    async def test_reasoning_collected_and_emitted_in_final(
+        self, monkeypatch, _reset_shared_llm_client
+    ):
         from alpha import llm
 
         # Monkeypatch the provider config so we hit the openai-compat path.
@@ -129,7 +150,9 @@ class TestStreamReasoningContent:
         assert final["reasoning_content"] == "thinking...more thoughts."
         assert final["error"] is None
 
-    async def test_reasoning_none_when_provider_does_not_emit(self, monkeypatch):
+    async def test_reasoning_none_when_provider_does_not_emit(
+        self, monkeypatch, _reset_shared_llm_client
+    ):
         from alpha import llm
 
         monkeypatch.setattr(
@@ -167,7 +190,9 @@ class TestStreamReasoningContent:
         # check skips the field entirely.
         assert finals[0]["reasoning_content"] is None
 
-    async def test_reasoning_with_tool_calls(self, monkeypatch):
+    async def test_reasoning_with_tool_calls(
+        self, monkeypatch, _reset_shared_llm_client
+    ):
         """Simula o caso real do bug: thinking + tool_call simultaneos."""
         from alpha import llm
 

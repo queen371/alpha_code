@@ -35,6 +35,38 @@ RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 _LOW_TEMPERATURE = 0.2
 
 
+# #026/#076: cliente httpx compartilhado por loop. Antes, cada call ao LLM
+# criava `AsyncClient(...)` e fechava no fim, gastando 1 TLS handshake +
+# nova conexao TCP por iteracao do agent loop (40+ por sessao tipica). O
+# cliente persistido reusa keep-alive ate o servidor fechar a conexao.
+# Loop-aware (mesma logica do _shared_client em web_search.py): single-shot
+# CLI (`asyncio.run`) cria loop novo a cada invocacao mas o modulo pode
+# permanecer em cache de imports — entao detectamos loop trocado e
+# substituimos.
+_shared_llm_client: httpx.AsyncClient | None = None
+_llm_client_loop: object | None = None
+
+
+async def _get_shared_llm_client() -> httpx.AsyncClient:
+    global _shared_llm_client, _llm_client_loop
+    loop = asyncio.get_running_loop()
+    if (
+        _shared_llm_client is None
+        or _shared_llm_client.is_closed
+        or _llm_client_loop is not loop
+    ):
+        if _shared_llm_client is not None and not _shared_llm_client.is_closed:
+            try:
+                await _shared_llm_client.aclose()
+            except Exception:
+                pass
+        _shared_llm_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(LLM_TIMEOUT, connect=10.0)
+        )
+        _llm_client_loop = loop
+    return _shared_llm_client
+
+
 def _recover_tool_call_from_content(content: str) -> dict | None:
     """Recover a tool call from a content string when the model emitted it as
     text instead of via the OpenAI ``tool_calls`` field.
@@ -190,120 +222,118 @@ async def stream_chat_with_tools(
         tool_calls_acc: dict[int, dict] = {}
 
         try:
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(LLM_TIMEOUT, connect=10.0)
-            ) as client:
-                async with client.stream(
-                    "POST",
-                    f"{base_url}/chat/completions",
-                    json=payload,
-                    headers=headers,
-                ) as response:
-                    # Handle retryable HTTP errors
-                    if response.status_code in RETRYABLE_STATUS_CODES:
-                        error_body = await response.aread()
-                        last_error = f"HTTP {response.status_code}"
+            client = await _get_shared_llm_client()
+            async with client.stream(
+                "POST",
+                f"{base_url}/chat/completions",
+                json=payload,
+                headers=headers,
+            ) as response:
+                # Handle retryable HTTP errors
+                if response.status_code in RETRYABLE_STATUS_CODES:
+                    error_body = await response.aread()
+                    last_error = f"HTTP {response.status_code}"
 
-                        if attempt < MAX_RETRIES:
-                            # Parse Retry-After header for rate limits
-                            retry_after = None
-                            ra_header = response.headers.get("retry-after")
-                            if ra_header:
-                                try:
-                                    retry_after = float(ra_header)
-                                except ValueError:
-                                    pass
+                    if attempt < MAX_RETRIES:
+                        # Parse Retry-After header for rate limits
+                        retry_after = None
+                        ra_header = response.headers.get("retry-after")
+                        if ra_header:
+                            try:
+                                retry_after = float(ra_header)
+                            except ValueError:
+                                pass
 
-                            delay = _calc_backoff(attempt, retry_after)
-                            logger.warning(
-                                f"LLM {last_error} (attempt {attempt + 1}/{MAX_RETRIES + 1}), "
-                                f"retrying in {delay:.1f}s"
-                            )
-                            if accumulated_content:
-                                yield {"type": "stream_reset", "reason": last_error}
-                            await asyncio.sleep(delay)
-                            continue
-
-                        # Max retries exhausted
-                        logger.error(f"LLM {last_error} after {MAX_RETRIES + 1} attempts")
-                        yield {
-                            "type": "final",
-                            "content": "",
-                            "tool_calls": [],
-                            "error": f"{last_error} after {MAX_RETRIES + 1} attempts",
-                        }
-                        return
-
-                    # Non-retryable HTTP error
-                    if response.status_code >= 400:
-                        error_body = await response.aread()
-                        # Some providers echo back the request (incl. Authorization
-                        # header) in error responses — sanitize before logging.
-                        body_str = error_body.decode("utf-8", errors="replace")
-                        logger.error(
-                            f"LLM HTTP {response.status_code}: "
-                            f"{sanitize_for_log(body_str, max_chars=500)}"
+                        delay = _calc_backoff(attempt, retry_after)
+                        logger.warning(
+                            f"LLM {last_error} (attempt {attempt + 1}/{MAX_RETRIES + 1}), "
+                            f"retrying in {delay:.1f}s"
                         )
-                        yield {
-                            "type": "final",
-                            "content": "",
-                            "tool_calls": [],
-                            "error": f"HTTP error {response.status_code}",
-                        }
-                        return
+                        if accumulated_content:
+                            yield {"type": "stream_reset", "reason": last_error}
+                        await asyncio.sleep(delay)
+                        continue
 
-                    # Stream response
-                    async for line in response.aiter_lines():
-                        if not line.startswith("data: "):
-                            continue
-                        data_str = line[6:]
-                        if data_str.strip() == "[DONE]":
-                            break
+                    # Max retries exhausted
+                    logger.error(f"LLM {last_error} after {MAX_RETRIES + 1} attempts")
+                    yield {
+                        "type": "final",
+                        "content": "",
+                        "tool_calls": [],
+                        "error": f"{last_error} after {MAX_RETRIES + 1} attempts",
+                    }
+                    return
 
-                        try:
-                            data = json.loads(data_str)
-                            delta = data["choices"][0].get("delta", {})
+                # Non-retryable HTTP error
+                if response.status_code >= 400:
+                    error_body = await response.aread()
+                    # Some providers echo back the request (incl. Authorization
+                    # header) in error responses — sanitize before logging.
+                    body_str = error_body.decode("utf-8", errors="replace")
+                    logger.error(
+                        f"LLM HTTP {response.status_code}: "
+                        f"{sanitize_for_log(body_str, max_chars=500)}"
+                    )
+                    yield {
+                        "type": "final",
+                        "content": "",
+                        "tool_calls": [],
+                        "error": f"HTTP error {response.status_code}",
+                    }
+                    return
 
-                            # Content tokens
-                            content = delta.get("content", "")
-                            if content:
-                                accumulated_content += content
-                                yield {"type": "content_token", "token": content}
+                # Stream response
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data_str = line[6:]
+                    if data_str.strip() == "[DONE]":
+                        break
 
-                            # Thinking tokens (DeepSeek-reasoner). Acumulados
-                            # silenciosamente — nao streamamos para o usuario
-                            # porque o formato e ruidoso e nao reflete a
-                            # resposta final, mas precisam voltar pro provider.
-                            reasoning = delta.get("reasoning_content", "")
-                            if reasoning:
-                                accumulated_reasoning += reasoning
+                    try:
+                        data = json.loads(data_str)
+                        delta = data["choices"][0].get("delta", {})
 
-                            # Tool calls (streamed incrementally)
-                            if delta.get("tool_calls"):
-                                for tc_delta in delta["tool_calls"]:
-                                    idx = tc_delta["index"]
-                                    if idx not in tool_calls_acc:
-                                        tool_calls_acc[idx] = {
-                                            "id": tc_delta.get("id", ""),
-                                            "name": tc_delta.get("function", {}).get(
-                                                "name", ""
-                                            ),
-                                            "arguments": "",
-                                        }
-                                    entry = tool_calls_acc[idx]
-                                    if tc_delta.get("id"):
-                                        entry["id"] = tc_delta["id"]
-                                    fn = tc_delta.get("function", {})
-                                    if fn.get("name"):
-                                        entry["name"] = fn["name"]
-                                    if fn.get("arguments"):
-                                        entry["arguments"] += fn["arguments"]
+                        # Content tokens
+                        content = delta.get("content", "")
+                        if content:
+                            accumulated_content += content
+                            yield {"type": "content_token", "token": content}
 
-                        except json.JSONDecodeError:
-                            continue  # Expected for non-JSON SSE lines
-                        except (KeyError, IndexError) as e:
-                            logger.debug(f"Unexpected SSE chunk format: {e} | data: {data_str[:200]}")
-                            continue
+                        # Thinking tokens (DeepSeek-reasoner). Acumulados
+                        # silenciosamente — nao streamamos para o usuario
+                        # porque o formato e ruidoso e nao reflete a
+                        # resposta final, mas precisam voltar pro provider.
+                        reasoning = delta.get("reasoning_content", "")
+                        if reasoning:
+                            accumulated_reasoning += reasoning
+
+                        # Tool calls (streamed incrementally)
+                        if delta.get("tool_calls"):
+                            for tc_delta in delta["tool_calls"]:
+                                idx = tc_delta["index"]
+                                if idx not in tool_calls_acc:
+                                    tool_calls_acc[idx] = {
+                                        "id": tc_delta.get("id", ""),
+                                        "name": tc_delta.get("function", {}).get(
+                                            "name", ""
+                                        ),
+                                        "arguments": "",
+                                    }
+                                entry = tool_calls_acc[idx]
+                                if tc_delta.get("id"):
+                                    entry["id"] = tc_delta["id"]
+                                fn = tc_delta.get("function", {})
+                                if fn.get("name"):
+                                    entry["name"] = fn["name"]
+                                if fn.get("arguments"):
+                                    entry["arguments"] += fn["arguments"]
+
+                    except json.JSONDecodeError:
+                        continue  # Expected for non-JSON SSE lines
+                    except (KeyError, IndexError) as e:
+                        logger.debug(f"Unexpected SSE chunk format: {e} | data: {data_str[:200]}")
+                        continue
 
             # Success — build final event and return
             reasoning_out = accumulated_reasoning or None

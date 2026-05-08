@@ -33,7 +33,10 @@ all = [
     "alpha-code[browser,network,database,web,dev]",
 ]
 dev = [
-    "pytest>=8.0",
+    # #025/#026 (SEC V1.1): pin >= 9.0.3 quando upstream cortar release
+    # com fix de CVE-2026-XXXX (pytest). Hoje suite roda em 9.0.2 — quando
+    # 9.0.3 sair, `pip install -e .[dev] --upgrade` puxa automaticamente.
+    "pytest>=9.0.2",
     "pytest-asyncio>=0.24",
 ]
 

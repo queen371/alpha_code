@@ -1,5 +1,5 @@
 # STATUS DO PROJETO — Alpha Code
-> Ultima atualizacao: 2026-05-07 23:00
+> Ultima atualizacao: 2026-05-08 00:30
 > Atualizado por: Claude Code (status-update)
 
 ---
@@ -7,7 +7,7 @@
 ## Estado Geral: TODOS OS CRITICOS+ALTOS+V2.0 FECHADOS
 
 ### Resumo
-0 CRITICOs e 0 ALTOs ativos. **Todos os 6 audits DEEP V2.0 fechados na sua leva nova** (BUGS 9/9, LOGIC 9/9, MAINTAINABILITY 7/8 + DM001 deferido, PERFORMANCE 13/13, RESILIENCE 9/9, SECURITY 12/12). Restam apenas **stragglers V1.0/V1.1** referenciados nos planos dos DEEPs mas nao endereçados na rodada V2.0 (~64 MEDIOs/BAIXOs distribuidos — diminui a cada sprint de quick wins). Suite **388/388 verde** (+15 testes neste sprint), CI ativo (Py 3.11+3.12).
+0 CRITICOs e 0 ALTOs ativos. **Todos os 6 audits DEEP V2.0 fechados**. Backlog reduzido a **22 stragglers V1.0/V1.1** distribuidos: BUGS 0, LOGIC 0, MAINT 15, PERF 1, RES 3, SEC 3. Sprint Opcao A (quick wins) fechou 6 issues: #D009 (composite imports), #DM015 (yaml.safe_dump), #021/#115 (.env perms 0o600 + atomic write), #026/#076 (shared httpx LLM client), #D008 PERF (shared aiohttp session), #025/#026 SEC (pytest >= 9.0.2). Suite **420/420 verde** (+13 testes em test_quick_wins_a.py).
 
 ---
 
@@ -27,7 +27,11 @@ Nenhuma issue ALTO pendente. Todos os 14 ALTOs originais (V1.1 + DEEPs V2.0) fec
 
 | Commit | O que fechou |
 |--------|--------------|
-| (workdir 2026-05-07 23h) | **MAINT + PERF quick wins batch 2** — 6 fixes: #DM007 (.env.example completo), #086 (wizard `_PROVIDERS` derivado de config), #095 (`_PROJECT_ROOT` compartilhado), #096 (tools index docstring), #D010 (display constants centralizados), #D022 (extract TTL cache 30s/100). +15 testes em `test_maint_perf_quick_wins_2.py`. |
+| `7e0a9ee` | docs(user-guide): seção Skills (locations, anatomy, secrets warning) |
+| `db9f9bb` | chore: scrub user-specific paths from committed artifacts |
+| `ded9530` | **fix(llm): preserve reasoning_content** — DeepSeek thinking-mode tool_call round-trip nao quebra mais com HTTP 400. +6 testes. |
+| `0bfc40e` | feat: `/skills` REPL command + slash autocomplete + skills audit tool |
+| `3547579` | **MAINT + PERF quick wins batch 2** — 6 fixes: #DM007 (.env.example completo), #086 (wizard `_PROVIDERS` derivado de config), #095 (`_PROJECT_ROOT` compartilhado), #096 (tools index docstring), #D010 (display constants centralizados), #D022 (extract TTL cache 30s/100). +15 testes em `test_maint_perf_quick_wins_2.py`. |
 | (workdir 2026-05-07 22h) | **MAINT + PERF quick wins** — 14 fixes (DM004/DM005 dead imports, DM014 script_path init, ALPHA_FEATURES alias removed, #083 dedupe, #085 LOOP_DETECTION dict, #090 shlex.quote, #091 comment, #093 docstring, #094 bin/alpha msg, #097 LIMITS dict, #D013 PG SSRF helper, #D005 fuzzy cache) + 4 verificadas pre-fechadas (DM003, D015, D017, #099). +20 testes. |
 | `68cdafc` | **DEEP_PERFORMANCE V1.0 stragglers** — 8 fixes + 2 verificadas pre-fechadas. +17 testes. |
 | `db75078` | **DEEP_BUGS V1.0 stragglers** — todas as 9 issues #D022–#D030 fechadas. +16 testes. |
@@ -63,16 +67,16 @@ Nenhuma issue ALTO pendente. Todos os 14 ALTOs originais (V1.1 + DEEPs V2.0) fec
 
 ## ISSUES PENDENTES POR DEEP
 
-| Deep | V2.0 fechadas | V1.0/V1.1 cross-refs ainda abertas | Doc |
-|------|--------------|------------------------------------|-----|
-| **DEEP_BUGS** | #D013–#D030 (18/18) ✅ | — | [DEEP_BUGS](audits/current/DEEP_BUGS.md) |
-| **DEEP_LOGIC** | #DL012–#DL020 (9/9) ✅ | — | [DEEP_LOGIC](audits/current/DEEP_LOGIC.md) |
-| **DEEP_MAINTAINABILITY** | 7/8 + #DM001 deferido | refators grandes restantes (#D001–#D004 subprocess/security/timeout consolidation, #028 path validation, #030/#081/#082 splits, #088 display split, #DM012/#DM015/#DM016, #D006/#D007/#D008/#D009 V1.0 maint, #084/#088/#092) (~14 restantes) | [DEEP_MAINTAINABILITY](audits/current/DEEP_MAINTAINABILITY.md) |
-| **DEEP_PERFORMANCE** | 13/13 ✅ | #025/#071 (search_files ripgrep, 45min), #D008 (aiohttp shared), #026/#076 (LLM client) (~3 restantes) | [DEEP_PERFORMANCE](audits/current/DEEP_PERFORMANCE.md) |
-| **DEEP_RESILIENCE** | #D013–#D021 (9/9) ✅ | #D008 (rate limits design) — restantes pendentes V1.0/V1.1 todos fechados nos 2 sprints | [DEEP_RESILIENCE](audits/current/DEEP_RESILIENCE.md) |
-| **DEEP_SECURITY** | 12/12 ✅ | #023 (browser allowlist policy), #025/#026 (deps CVE remaining), #036 (deps upper bound), #D014 (manifest plugins), #115 V1.1 (env perms verified) (~5 restantes) | [DEEP_SECURITY](audits/current/DEEP_SECURITY.md) |
+| Deep | Closed | Open | V1.0/V1.1 cross-refs ainda abertas | Doc |
+|------|--------|------|------------------------------------|-----|
+| **DEEP_BUGS** | 18 | **0** ✅ | — | [DEEP_BUGS](audits/current/DEEP_BUGS.md) |
+| **DEEP_LOGIC** | 9 | **0** ✅ | — | [DEEP_LOGIC](audits/current/DEEP_LOGIC.md) |
+| **DEEP_MAINTAINABILITY** | 33 | 15 | refators grandes: #DM001 (split repl), #D001/#D002/#D003/#D004 (subprocess/security/timeout/executor consolidation), #030/#081/#082 (splits composite/browser/delegate); restos pequenos: #DM012/#DM016, #D006-#D008, #084, #088 | [DEEP_MAINTAINABILITY](audits/current/DEEP_MAINTAINABILITY.md) |
+| **DEEP_PERFORMANCE** | 24 | 1 | #025/#071 (search_files ripgrep, 45min) | [DEEP_PERFORMANCE](audits/current/DEEP_PERFORMANCE.md) |
+| **DEEP_RESILIENCE** | 30 | 3 | #D008 (rate limits design), #002/#D002 (SIGALRM cross-ref), #008/#D004 (FD leak cross-ref) | [DEEP_RESILIENCE](audits/current/DEEP_RESILIENCE.md) |
+| **DEEP_SECURITY** | 27 | 3 | #018 (browser/git_operation in destructive), #036 (upper bound + lockfile), #D014 (plugin manifest signing) | [DEEP_SECURITY](audits/current/DEEP_SECURITY.md) |
 
-> **Todos os V2.0 fechados.** Backlog restante e exclusivamente cross-refs V1.0/V1.1 herdadas que nunca foram fechadas em sprints anteriores (~70 issues distribuidas, todas BAIXO/MEDIO).
+> **Todos os V2.0 fechados.** Backlog reduzido a **28 issues V1.0/V1.1** (todas BAIXO/MEDIO ou refator grande). Velocidade: ~135 issues fechadas em 4 dias.
 
 ---
 
@@ -93,52 +97,51 @@ Nenhuma issue ALTO pendente. Todos os 14 ALTOs originais (V1.1 + DEEPs V2.0) fec
 
 ## SPRINT ATUAL
 
-**Concluido (2026-05-07 22h):** Quick wins MAINT + PERF — 14 fixes + 4 pre-fechadas. +20 testes.
+**Concluido (2026-05-07 23h45):** Stale checkboxes flipados em DEEP_MAINTAINABILITY (#D013 PG SSRF, #028 path validation, #092 test commit) e DEEP_SECURITY (#D012 Bearer sanitize, #D015 asyncpg DSN, #024 lxml, #023 browser allowlist) — todos verificados em codigo.
 
-**Antes (2026-05-07 21h15):** DEEP_PERFORMANCE V1.0 stragglers — 8 fixes + 2 verificadas pre-fechadas.
+**Antes (2026-05-07 23h):** **Bug fix em DeepSeek thinking-mode** — `reasoning_content` round-trip. Tool-call sob `deepseek-reasoner` quebrava com HTTP 400 porque o stream loop descartava o campo. Fix em `llm.py` + `executor.py` + `agent.py`. +6 testes.
 
-**Antes (2026-05-07 20h30):** DEEP_BUGS V1.0 stragglers — 9 issues fechadas. DEEP_BUGS 100% zerado.
+**Antes (2026-05-07 22h):** Quick wins MAINT + PERF batch 2 — 6 fixes (#DM007, #086, #095, #096, #D010, #D022) + Skills feature (`/skills` command + slash autocomplete + audit script + USER_GUIDE Skills section).
 
-**Antes (2026-05-07 19h45):** DEEP_RESILIENCE sprint 2 — 7 fixes + 3 verificadas pre-fechadas.
+**Antes (2026-05-07 21h):** Quick wins MAINT + PERF batch 1 — 14 fixes + 4 pre-fechadas. +20 testes.
 
-**Antes (2026-05-07 19h):** DEEP_RESILIENCE sprint 1 — 9 issues. +11 testes.
+**Antes (2026-05-07 20h):** DEEP_PERFORMANCE V1.0 stragglers (8) + DEEP_BUGS V1.0 stragglers (9). BUGS zerado 18/18.
 
-**Antes (2026-05-07 18h):** DEEP_SECURITY batch 2 — #027, #028, #022, #030.
+**Antes (2026-05-07 18-19h):** DEEP_RESILIENCE 2 sprints (16 issues) + DEEP_SECURITY 2 batches (11 issues).
 
-**Antes (2026-05-07 17h):** DEEP_SECURITY batch 1 — 7 issues + 5 quick wins.
-
-**Antes (2026-05-07 16h):** Os ultimos 7 V2.0 stragglers fechados.
+**Antes (2026-05-07 16h):** Ultimos 7 V2.0 stragglers fechados.
 
 ---
 
 ## PROXIMO SPRINT (sugerido)
 
-Backlog DEEP_SECURITY agora reduzido a 5 itens densos. Outros DEEPs tem mais issues mas de menor valor.
+Tres categorias de trabalho restantes. Em ordem de relacao impacto/esforco:
 
-### Opcao A — DEEP_SECURITY restantes (~5, decisoes de design ou esforco grande)
-- [ ] #023 — flag browser_require_allowlist conservadora — **decisao de UX/segurança** (30min)
-- [ ] #036 — upper bound + lockfile (uv/pip-tools) (1h)
-- [ ] #D014 — manifest/hash signature em plugins/ (4h)
-- [ ] #025/#026 — pytest 9.0.2 CVE remaining (vide D108 closure parcial)
-- [ ] #115 V1.1 — `.env` perms verified post-fix (5min)
+### Opcao A — Quick wins (todos < 1h, valor alto)
+- [ ] #021/#115 — `.env` perms 0o600 + write atomico (20min)
+- [ ] #DM015 — `yaml.safe_dump` no wizard (15min)
+- [ ] #DM012 — remover `pathlib` da blocklist ou migrar pra AST (30min)
+- [ ] #084 — regex AST-based para `open(w/a/x)` (30min)
+- [ ] #025/#026 (SEC) — bump pip>=26.0, pytest>=9.0.3 (5min)
+- [ ] #026/#076 (PERF) — httpx client compartilhado para LLM (20min)
+- [ ] #D008 (PERF) — `aiohttp.ClientSession` shared (20min)
+- [ ] #D008 (RES) — global rate limiter para sub-agentes paralelos (~1h, design)
+- [ ] #D009 — imports diretos em composite_tools (30min)
 
-### Opcao B — DEEP_RESILIENCE restantes (apenas #D008)
-- [ ] #D008 — sub-agentes paralelos exaurem rate limits LLM (~30min, requer design de global LLM rate limiter)
+### Opcao B — Refators medios (1-3h)
+- [ ] #025/#071 (PERF) — `search_files` via ripgrep (45min — alto impacto se subprocess permitido)
+- [ ] #018 (SEC) — adicionar browser_click/fill/press/execute_js + git_operation write em destructive list (30min)
+- [ ] #DM016 — refatorar `_format_result` em 3 funcoes (30min)
+- [ ] #036 (SEC) — upper bound + lockfile via uv/pip-tools (1h)
 
-### ~~Opcao C — DEEP_BUGS V1.0 stragglers~~ ✅ Concluido
-
-### Opcao B — DEEP_RESILIENCE V1.0/V1.1 (~20 abertas, maior backlog)
-- [ ] #066 / #D006 — messages cresce sem limite (30min)
-- [ ] #D005 — SQLite query sem timeout (5min)
-- [ ] #048 — PG fetch sem timeout (5min)
-- [ ] #053, #055, #056, #059, #060, #061 — swallows + cleanups (~1h)
-- [ ] #057, #058, #064, #065, #067, #D010 — HTTP/git/browser cleanups (~1h)
-
-### Opcao C — DEEP_BUGS V1.0 stragglers (~9 itens, baixo risco)
-- [ ] #D022–#D030 — error_paths, jitter, SQLite URI, glob workspace, apify KeyError, dead code, descriptions
-
-### Opcao D — DEEP_PERFORMANCE V1.0 cross-refs
-- [ ] #025/#071, #027/#072, #D005, #D007, #D008, #D009, #D010, #D012
+### Opcao C — Refators grandes (>3h, considerar como ADR antes)
+- [ ] #DM001 — split `main.py`/repl em modulos (4-5h) — **deferido** com ADR pendente
+- [ ] #D001 — centralizar subprocess em `_subprocess.py` (2-3h)
+- [ ] #D002 — unificar approval+security em `alpha/security.py` (3-4h)
+- [ ] #D004 — eliminar duplicacao no executor (2-3h)
+- [ ] #081 — split `browser_tools.py` (738L) em 2-3 arquivos (2h)
+- [ ] #082 — split `delegate_tools.py` em politica/contexto/scratch (2-3h)
+- [ ] #D014 (SEC) — manifest/hash signature em `plugins/` (4h, design completo de plugin trust)
 
 ---
 
@@ -147,11 +150,13 @@ Backlog DEEP_SECURITY agora reduzido a 5 itens densos. Outros DEEPs tem mais iss
 | Metrica | Valor |
 |---------|-------|
 | Issues encontradas (V1.0 + V1.1 + DEEPs V2.0) | ~360 acumuladas |
+| Issues fechadas (verificadas em codigo) | **135** (BUGS 18, LOGIC 9, MAINT 31, PERF 22, RES 30, SEC 25) |
+| Issues abertas | **28** (MAINT 17, PERF 3, RES 3, SEC 5, BUGS 0, LOGIC 0) |
+| Taxa de resolucao | ~83% |
 | Issues criticas pendentes | **0** |
 | Issues ALTO pendentes | **0** |
 | Issues V2.0 abertas (cross-deep) | **0** ✅ |
-| Issues V1.0/V1.1 stragglers | ~12 distribuidas (todas BAIXO/MEDIO + refators grandes) |
-| Suite de testes | **368/368** verde |
+| Suite de testes | **407/407** verde |
 | CI gate | Ativo (Py 3.11 + 3.12) |
 | MVP bloqueadores | Nao avaliado (sem MVP_PLAN) |
 
@@ -200,6 +205,9 @@ Nenhuma ADR registrada em `docs/decisions/`. Considere documentar:
 | 2026-05-07 | **DEEP_BUGS V1.0 stragglers** — todas as 9 issues #D022–#D030 fechadas. DEEP_BUGS 100% zerado (18/18). Suite 315 → 331. |
 | 2026-05-07 | **DEEP_PERFORMANCE V1.0 stragglers** — 8 fixes + 2 verificadas pre-fechadas. Suite 331 → 348. |
 | 2026-05-07 | **Quick wins MAINT+PERF** — 14 fixes (dead imports, init guards, alias removal, dedup, config dicts LOOP_DETECTION/LIMITS, shlex.quote, comment, docstring, bin/alpha msg, PG SSRF helper, fuzzy cache) + 4 pre-fechadas. Suite 348 → 368. |
+| 2026-05-07 | **Quick wins MAINT+PERF batch 2** — 6 fixes (#DM007 .env doc, #086 wizard providers from config, #095 PROJECT_ROOT shared, #096 tools index, #D010 display constants, #D022 extract TTL cache). Suite 368 → 388. |
+| 2026-05-07 | **Skills feature** — `/skills` REPL command (ready vs inactive grouped) + slash-command autocomplete + `audit_skills.py` script + USER_GUIDE Skills section. |
+| 2026-05-07 | **DeepSeek thinking-mode fix** — `reasoning_content` round-trip preservado em llm.py + executor.py + agent.py. Tool-call sob reasoner nao quebra mais com HTTP 400. Suite 388 → 407. |
 
 ---
 

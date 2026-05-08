@@ -80,32 +80,44 @@ def step_create_agent(provider: dict, model: str, workspace: str) -> Path | None
 
     description = ask(f"Description for '{name}'", default="")
 
-    lines = [
-        f"name: {name}",
-    ]
+    # #DM015: serializa via yaml.safe_dump em vez de f-string. Antes,
+    # description com `: ` ou aspas embutidas gerava YAML quebrado
+    # (`description: foo: bar` parsea como dict aninhado). safe_dump
+    # escapa/quote automaticamente. Comentarios sao append manual porque
+    # PyYAML nao preserva-os.
+    import yaml
+
+    payload: dict = {
+        "name": name,
+        "model": {"provider": provider["id"], "id": model},
+    }
     if description:
-        lines.append(f"description: {description}")
-    lines.extend([
-        "",
-        "model:",
-        f"  provider: {provider['id']}",
-        f"  id: {model}",
-        "",
-        f"workspace: {workspace}" if workspace else "# workspace: /path/to/dir",
-        "",
-        "# Uncomment and edit to restrict tools/skills:",
-        "# tools:",
-        "#   deny: [execute_shell, write_file, edit_file]",
-        "# skills:",
-        "#   allow: [github, summarize]",
-        "",
-        "# Extra guidance appended to the system prompt:",
-        "# system_prompt_extra: |",
-        "#   Focus on ... Do not ...",
-    ])
+        payload["description"] = description
+    if workspace:
+        payload["workspace"] = workspace
+
+    yaml_text = yaml.safe_dump(
+        payload, sort_keys=False, default_flow_style=False, allow_unicode=True
+    )
+
+    if not workspace:
+        yaml_text += "# workspace: /path/to/dir\n"
+
+    yaml_text += (
+        "\n"
+        "# Uncomment and edit to restrict tools/skills:\n"
+        "# tools:\n"
+        "#   deny: [execute_shell, write_file, edit_file]\n"
+        "# skills:\n"
+        "#   allow: [github, summarize]\n"
+        "\n"
+        "# Extra guidance appended to the system prompt:\n"
+        "# system_prompt_extra: |\n"
+        "#   Focus on ... Do not ...\n"
+    )
 
     target_dir.mkdir(parents=True, exist_ok=True)
-    target_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    target_file.write_text(yaml_text, encoding="utf-8")
     return target_file
 
 
