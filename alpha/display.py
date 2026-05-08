@@ -109,6 +109,17 @@ _CATEGORY_ICONS = {
 }
 
 
+# Cosmetic aliases — the LLM still sees the canonical name in tool_calls,
+# this only changes the label rendered in the terminal.
+_DISPLAY_TOOL_NAME_ALIASES = {
+    "execute_shell": "bash",
+}
+
+
+def _display_tool_name(name: str) -> str:
+    return _DISPLAY_TOOL_NAME_ALIASES.get(name, name)
+
+
 # ─── Display functions ───
 
 
@@ -131,7 +142,8 @@ def print_tool_call(name: str, args: dict, safety: str = "safe") -> None:
 
     safety_color = _SAFETY_COLORS.get(safety, C.YELLOW)
     icon = c(safety_color, _SAFETY_ICONS.get(safety, "⚡"))
-    tool_name = c(C.CYAN + C.BOLD, name) if safety == "safe" else c(safety_color + C.BOLD, name)
+    label = _display_tool_name(name)
+    tool_name = c(C.CYAN + C.BOLD, label) if safety == "safe" else c(safety_color + C.BOLD, label)
 
     print(f"  {icon} {tool_name}{args_str}")
 
@@ -494,7 +506,7 @@ def print_subagent_event(event: dict, agent_label: str = "") -> None:
                     val = val[:77] + "..."
                 args_str = f" {c(C.GRAY, val)}"
                 break
-        print(f"{prefix}{label} {icon} {c(C.CYAN, name)}{args_str}")
+        print(f"{prefix}{label} {icon} {c(C.CYAN, _display_tool_name(name))}{args_str}")
     elif event_type == "done":
         reply = event.get("reply", "")
         preview = reply[:DISPLAY_PREVIEW_TRUNCATE].replace("\n", " ") if reply else ""
@@ -580,8 +592,13 @@ def print_banner(provider: str, model: str) -> None:
   ║  ╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝       ║
   ╚══════════════════════════════════════════════════╝"""
 
-    print(c(C.GREEN + C.BOLD, banner))
-    print(f"  {c(C.GREEN_DARK, '│')} {c(C.WHITE + C.BOLD, 'ALPHA CODE')} {c(C.GRAY, '— Terminal Agent')}")
+    from . import __version__
+
+    print(c(C.MAGENTA + C.BOLD, banner))
+    print(
+        f"  {c(C.GREEN_DARK, '│')} {c(C.WHITE + C.BOLD, 'ALPHA CODE')} "
+        f"{c(C.GREEN, f'v{__version__}')} {c(C.GRAY, '— Terminal Agent')}"
+    )
     print(f"  {c(C.GREEN_DARK, '│')} {c(C.GRAY, 'cwd:')} {c(C.GREEN, cwd)}")
     print(f"  {c(C.GREEN_DARK, '│')} {c(C.GRAY, 'provider:')} {c(C.CYAN, f'{provider} ({model})')}")
     print(f"  {c(C.GREEN_DARK, '│')} {c(C.GRAY, 'Commands:')} /clear /history /continue /tools /model /help /exit")
