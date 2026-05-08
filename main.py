@@ -11,10 +11,8 @@ Usage:
 import argparse
 import asyncio
 import os
-import shutil
 import sys
 import textwrap
-from pathlib import Path
 
 from alpha.agents import get_agent
 from alpha.attachments import build_user_content
@@ -26,7 +24,7 @@ from alpha.config import (
 from alpha import hooks
 from alpha.repl_input import read_input
 from alpha.mcp import list_active_servers as list_mcp_servers
-from alpha.skills import get_skill, list_skills
+from alpha.skills import list_skills
 from alpha.display import (
     C,
     ThinkingIndicator,
@@ -36,26 +34,16 @@ from alpha.display import (
     print_error,
     print_phase,
     print_providers_list,
-    print_sessions_list,
     print_tool_call,
     print_tool_result,
-    print_tools_list,
-    reset_approve_all,
 )
-from alpha.history import (
-    generate_session_id,
-    get_last_session_id,
-    list_sessions,
-    load_session,
-    load_session_summary,
-    save_session,
-)
+from alpha.history import generate_session_id, save_session
+from alpha.cli.commands import DispatchResult, ReplContext, dispatch
 from alpha.cli.lifecycle import install_lifecycle_hooks
 from alpha.cli.setup import (
     approval_callback as _approval_callback,
     build_system_prompt as _build_system_prompt,
     get_tools_for_agent as _get_tools_for_agent,
-    list_agents,
     pick_provider_interactive as _pick_provider_interactive,
     resolve_active_agent as _resolve_active_agent,
 )
@@ -237,407 +225,39 @@ def run_repl(provider: str, temperature: float):
                 print()
                 continue
 
-        # Commands — but only treat as a slash command if the first token is
-        # `/word` (no embedded slashes). Paths like `/home/...` fall through
-        # to normal input.
+        # Slash command? Dispatch via alpha/cli/commands.
+        # Skip when the first token has an embedded `/` so that paths
+        # like `/home/foo/bar` fall through to normal input.
         first_token = user_input.split(maxsplit=1)[0]
         if user_input.startswith("/") and "/" not in first_token[1:]:
-            parts = user_input.split()
-            cmd = parts[0].lower()
-            if cmd in ("/exit", "/quit", "/q"):
-                if len(messages) > 1:
-                    save_session(session_id, messages, {"provider": provider, "model": cfg["model"]})
-                    print(f"  {c(C.GRAY, f'Session saved: {session_id}')}")
-                print(c(C.GRAY, "Goodbye."))
+            ctx = ReplContext(
+                messages=messages, history=history, session_id=session_id,
+                provider=provider, temperature=temperature, cfg=cfg,
+                system_prompt=system_prompt, tools=tools,
+                get_tool_fn=get_tool_fn, active_agent=active_agent,
+            )
+            result = dispatch(ctx, user_input)
+            # Pull mutable state back from ctx — handlers may have rebound
+            # session_id, provider, cfg, agent, etc.
+            messages, history = ctx.messages, ctx.history
+            session_id = ctx.session_id
+            provider, temperature, cfg = ctx.provider, ctx.temperature, ctx.cfg
+            system_prompt, tools, get_tool_fn = ctx.system_prompt, ctx.tools, ctx.get_tool_fn
+            active_agent = ctx.active_agent
+
+            if result is DispatchResult.BREAK:
                 break
-            elif cmd == "/clear":
-                history.clear()
-                messages[:] = [{"role": "system", "content": system_prompt}]
-                session_id = generate_session_id()
-                reset_approve_all()
-                os.system("clear" if os.name != "nt" else "cls")
-                print_banner(provider, cfg["model"])
+            if result is DispatchResult.CONTINUE:
                 continue
-            elif cmd == "/history":
-                if not history:
-                    print(c(C.GRAY, "  History is empty."))
-                else:
-                    for msg in history[-20:]:
-                        role = msg["role"]
-                        content = msg["content"][:100]
-                        color = C.GREEN if role == "user" else C.CYAN
-                        print(f"  {c(color, role)}: {content}")
-                continue
-            elif cmd == "/save":
-                save_session(session_id, messages, {"provider": provider, "model": cfg["model"]})
-                print(f"  {c(C.GREEN, f'Session saved: {session_id}')}")
-                continue
-            elif cmd == "/load":
-                if len(parts) < 2:
-                    # Show available sessions
-                    sessions = list_sessions(10)
-                    if not sessions:
-                        print(c(C.GRAY, "  No saved sessions."))
-                    else:
-                        print(f"  {c(C.CYAN, 'Recent sessions:')}")
-                        for s in sessions:
-                            print(
-                                f"  {c(C.GREEN, s['session_id'])} "
-                                f"({s['message_count']} msgs) "
-                                f"{c(C.GRAY, s['preview'])}"
-                            )
-                        print(f"\n  {c(C.GRAY, 'Usage: /load <session_id>')}")
-                else:
-                    loaded = load_session(parts[1])
-                    if loaded is None:
-                        print(c(C.RED, f"  Session not found: {parts[1]}"))
-                    else:
-                        messages[:] = [{"role": "system", "content": system_prompt}]
-                        messages.extend(loaded)
-                        history.clear()
-                        history.extend(m for m in loaded if m["role"] in ("user", "assistant"))
-                        # Por default gera novo session_id em vez de reusar
-                        # `parts[1]` — antes, edicoes apos `/load` sobrescreviam
-                        # silenciosamente a sessao original (#DL018).
-                        # `--inplace` mantem o id antigo para quem quer
-                        # explicitamente continuar a mesma sessao.
-                        if len(parts) >= 3 and parts[2] == "--inplace":
-                            session_id = parts[1]
-                            print(f"  {c(C.GREEN, f'Loaded {len(loaded)} messages from {parts[1]} (in-place: saves overwrite)')}")
-                        else:
-                            session_id = generate_session_id()
-                            print(f"  {c(C.GREEN, f'Loaded {len(loaded)} messages from {parts[1]} into new session {session_id}')}")
-                            print(f"  {c(C.GRAY, '  (use /load <id> --inplace to overwrite the original instead)')}")
-                continue
-            elif cmd == "/continue":
-                # Resume from last session using its summary as context
-                last_id = get_last_session_id()
-                if not last_id:
-                    print(c(C.GRAY, "  No previous session found."))
-                    continue
-                summary = load_session_summary(last_id)
-                if not summary:
-                    # Fallback: load full session
-                    loaded = load_session(last_id)
-                    if loaded is None:
-                        print(c(C.RED, f"  Failed to load session: {last_id}"))
-                        continue
-                    messages[:] = [{"role": "system", "content": system_prompt}]
-                    messages.extend(loaded)
-                    history.clear()
-                    history.extend(m for m in loaded if m["role"] in ("user", "assistant"))
-                    print(f"  {c(C.GREEN, f'Resumed {len(loaded)} messages from {last_id}')}")
-                else:
-                    # Inject compressed summary as context
-                    messages[:] = [{"role": "system", "content": system_prompt}]
-                    messages.append({
-                        "role": "user",
-                        "content": (
-                            f"[CONTEXT FROM PREVIOUS SESSION {last_id}]\n\n"
-                            f"{summary}\n\n"
-                            "[End of previous context. Continue from here.]"
-                        ),
-                    })
-                    messages.append({
-                        "role": "assistant",
-                        "content": (
-                            "Understood. I have the context from our previous session. "
-                            "How would you like to continue?"
-                        ),
-                    })
-                    history.clear()
-                    print(f"  {c(C.GREEN, f'Resumed with summary from {last_id}')}")
-                session_id = generate_session_id()
-                continue
-            elif cmd == "/sessions":
-                print_sessions_list(list_sessions(20))
-                continue
-            elif cmd == "/tools":
-                print_tools_list(tools)
-                continue
-            elif cmd == "/skills":
-                skills = sorted(list_skills(), key=lambda s: s.name)
-                if not skills:
-                    print(c(C.GRAY, "  No skills registered."))
-                    continue
-                # Group by availability so the user sees what's invokable now
-                # vs. what needs a binary install.
-                ready: list = []
-                inactive: list = []
-                for s in skills:
-                    missing = [b for b in s.requires_bins if not shutil.which(b)]
-                    (inactive if missing else ready).append((s, missing))
-                print(f"  {c(C.GRAY, f'{len(skills)} skills registered '
-                              f'({len(ready)} ready, {len(inactive)} inactive)')}")
-                print(f"  {c(C.GRAY, 'Invoke with /<skill-name> [args]')}")
-                print()
-                if ready:
-                    print(f"  {c(C.GREEN + C.BOLD, 'Ready')}")
-                    for s, _ in ready:
-                        desc = (s.description or "").strip().split("\n", 1)[0]
-                        print(
-                            f"  {c(C.GREEN, '✦')} {c(C.CYAN, s.name):<24} "
-                            f"{c(C.GRAY, desc[:90])}"
-                        )
-                    print()
-                if inactive:
-                    print(f"  {c(C.YELLOW + C.BOLD, 'Inactive (missing bins)')}")
-                    for s, missing in inactive:
-                        print(
-                            f"  {c(C.YELLOW, '○')} {c(C.GRAY, s.name):<24} "
-                            f"{c(C.GRAY, 'needs: ' + ', '.join(missing))}"
-                        )
-                continue
-            elif cmd == "/image":
-                if len(parts) < 2:
-                    print(f"  {c(C.GRAY, 'Usage: /image <path> [optional message]')}")
-                    print(f"  {c(C.GRAY, 'Example: /image /tmp/screenshot.png what is wrong?')}")
-                    continue
-                img_path_str = parts[1]
-                img_path = Path(os.path.expanduser(img_path_str))
-                if not img_path.is_file():
-                    print_error(f"Image not found: {img_path}")
-                    continue
-                # The text after the path becomes the user message; default if absent.
-                rest = user_input.split(maxsplit=2)
-                msg_text = rest[2] if len(rest) >= 3 else "What's in this image?"
-                cwd = os.getcwd()
-                user_content = build_user_content(
-                    f"[CWD: {cwd}]\n{msg_text}", [img_path]
-                )
-                print(c(C.GRAY, f"  (1 image attached: {img_path.name})"))
-                messages.append({"role": "user", "content": user_content})
-                history.append({"role": "user", "content": f"[image: {img_path.name}] {msg_text}"})
-                print()
-                try:
-                    reply = asyncio.run(
-                        _run_once(
-                            messages, msg_text, provider, temperature,
-                            get_tool_fn, tools,
-                            workspace=active_agent.workspace if active_agent else None,
-                        )
-                    )
-                except KeyboardInterrupt:
-                    print(c(C.YELLOW, "\n\nInterrupted."))
-                    reply = ""
-                print()
-                if reply:
-                    messages.append({"role": "assistant", "content": reply})
-                    history.append({"role": "assistant", "content": reply})
-                continue
-            elif cmd == "/mcp":
-                servers = list_mcp_servers()
-                if not servers:
-                    print(c(C.GRAY, "  No MCP servers connected. Configure .alpha/mcp.json"))
-                else:
-                    for s in servers:
-                        tool_names = ", ".join(s["tools"]) or c(C.GRAY, "(no tools)")
-                        print(f"  {c(C.CYAN, s['name']):30s} {tool_names}")
-                continue
-            elif cmd == "/agents":
-                agents = list_agents()
-                if not agents:
-                    print(c(C.GRAY, "  No agents defined. Create ./agents/<name>/agent.yaml"))
-                else:
-                    current = active_agent.name if active_agent else None
-                    for a in agents:
-                        marker = c(C.GREEN, "●") if a.name == current else " "
-                        desc = a.description or c(C.GRAY, "(no description)")
-                        print(f"  {marker} {c(C.CYAN, a.name):30s} {desc}")
-                continue
-            elif cmd == "/agent":
-                if len(parts) < 2:
-                    name = active_agent.name if active_agent else "(none)"
-                    print(f"  {c(C.GRAY, 'Active agent:')} {name}")
-                    print(f"  {c(C.GRAY, 'Usage: /agent <name>  (or /agent none to clear)')}")
-                else:
-                    target = parts[1]
-                    if target in ("none", "clear", "off"):
-                        active_agent = None
-                    else:
-                        picked = get_agent(target)
-                        if picked is None:
-                            print(c(C.RED, f"  Agent not found: {target}"))
-                            continue
-                        active_agent = picked
-
-                    # Re-apply scope
-                    if active_agent and active_agent.provider:
-                        provider = active_agent.provider
-                    if active_agent and active_agent.temperature is not None:
-                        temperature = active_agent.temperature
-                    cfg = get_provider_config(provider)
-                    if active_agent and active_agent.model:
-                        cfg["model"] = active_agent.model
-                    system_prompt = _build_system_prompt(active_agent)
-                    get_tool_fn, tools = _get_tools_for_agent(active_agent)
-                    messages[:] = [{"role": "system", "content": system_prompt}]
-                    history.clear()
-                    session_id = generate_session_id()
-                    name = active_agent.name if active_agent else "(none)"
-                    print(f"  {c(C.GREEN, '✓')} Switched to agent: {name} "
-                          f"({len(tools)} tools, provider={provider}, model={cfg['model']})")
-                continue
-            elif cmd == "/model":
-                providers_list = get_available_providers()
-
-                target = None
-                if len(parts) >= 2:
-                    target = parts[1]
-                else:
-                    print(f"  {c(C.GRAY, 'Current:')} {c(C.CYAN, provider)} → {cfg['model']}")
-                    print(f"  {c(C.GRAY, 'Available:')}")
-                    print_providers_list(providers_list, current=provider, numbered=True)
-                    try:
-                        choice = input(
-                            f"\n  {c(C.YELLOW + C.BOLD, f'Choose [1-{len(providers_list)}, Enter=cancel]:')} "
-                        ).strip()
-                    except (EOFError, KeyboardInterrupt):
-                        print()
-                        continue
-                    if not choice:
-                        continue
-                    target = choice
-
-                pick = None
-                if target.isdigit():
-                    idx = int(target) - 1
-                    if 0 <= idx < len(providers_list):
-                        pick = providers_list[idx]
-                else:
-                    pick = next((p for p in providers_list if p["id"] == target), None)
-
-                if pick is None:
-                    print_error(f"Provider not found: {target}")
-                    continue
-                if not pick["available"]:
-                    print_error(f"{pick['id']} is not available — set the API key first")
-                    continue
-
-                try:
-                    new_cfg = get_provider_config(pick["id"])
-                except RuntimeError as e:
-                    print_error(str(e))
-                    continue
-
-                provider = pick["id"]
-                cfg = new_cfg
-                if active_agent and active_agent.model:
-                    cfg["model"] = active_agent.model
-                # Reset conversation state so the new model starts clean.
-                # Otherwise prior turns aimed at a different provider can
-                # confuse smaller models (e.g. qwen-coder echoing template
-                # placeholders).
-                system_prompt = _build_system_prompt(active_agent)
-                messages[:] = [{"role": "system", "content": system_prompt}]
-                history.clear()
-                session_id = generate_session_id()
-                print(f"  {c(C.GREEN, '✓')} Switched to {c(C.CYAN, provider)} → {cfg['model']}")
-                if not cfg["supports_tools"]:
-                    print(f"  {c(C.YELLOW, '⚠')} {c(C.GRAY, 'chat-only mode — tools disabled for this model')}")
-                continue
-            elif cmd == "/init":
-                # Mirror Claude Code's /init: synthesize a prompt that asks
-                # the agent to analyze the project and draft an ALPHA.md.
-                # The agent uses normal tools (project_overview, read_file
-                # on manifests, etc.) and writes the file via write_file.
-                from alpha.project_context import CONTEXT_FILENAME
-                target = Path(os.getcwd()) / CONTEXT_FILENAME
-                force = "--force" in parts[1:]
-                if target.exists() and not force:
-                    print_error(
-                        f"{CONTEXT_FILENAME} already exists at {target}. "
-                        f"Pass /init --force to overwrite, or delete it first."
-                    )
-                    continue
-                action = "Overwrite the existing" if target.exists() else "Create a new"
-                user_input = (
-                    f"[/init invoked]\n"
-                    f"{action} `{CONTEXT_FILENAME}` at {target} that captures "
-                    f"this project's stable context for Alpha. Steps:\n"
-                    f"1. Run project_overview to learn the project layout, type, and git status.\n"
-                    f"2. Read the key manifest(s): pyproject.toml / package.json / "
-                    f"Cargo.toml / pom.xml / Gemfile / go.mod / requirements.txt — whichever exist.\n"
-                    f"3. Read README.md if present, plus 1–2 source entry points (main.py, "
-                    f"src/index.ts, app/main.py, etc.) to confirm the actual stack.\n"
-                    f"4. Write {CONTEXT_FILENAME} with these sections, in this order:\n"
-                    f"   - `# {CONTEXT_FILENAME} — <project name>` (one-line title)\n"
-                    f"   - `## What this project is` — one short paragraph.\n"
-                    f"   - `## Stack & dependencies` — language version, key libs, package manager.\n"
-                    f"   - `## How to run / build / test` — exact commands the user types.\n"
-                    f"   - `## House rules` — conventions you can infer (test framework, "
-                    f"linter, type-hint policy, comment policy). Mark inferences explicitly.\n"
-                    f"   - `## Status & docs` — point to STATUS.md / docs/ if they exist.\n"
-                    f"   - `## Out-of-scope` — anything obviously off-limits "
-                    f"(e.g. don't edit prompts/, never commit secrets).\n"
-                    f"5. Keep the file under 4 KB. No filler. No emoji. "
-                    f"Use plain Markdown. Do not invent commands you have not verified.\n"
-                    f"6. After writing, print a one-line confirmation summarizing what you "
-                    f"included and remind the user to review before committing."
-                )
-                print(
-                    f"  {c(C.GREEN, '✦')} {c(C.CYAN, '/init')} "
-                    f"{c(C.GRAY, f'— drafting {CONTEXT_FILENAME} for {os.path.basename(os.getcwd())}')}"
-                )
-                # Fall through to the LLM call with the synthetic prompt above.
-
-            elif cmd == "/help":
-                print(f"  {c(C.CYAN, '/init')}     — Draft an ALPHA.md for this project")
-                print(f"  {c(C.CYAN, '/clear')}    — Clear history and screen")
-                print(f"  {c(C.CYAN, '/history')}  — Show conversation history")
-                print(f"  {c(C.CYAN, '/save')}     — Save current session")
-                print(f"  {c(C.CYAN, '/load')}     — Load a previous session")
-                print(f"  {c(C.CYAN, '/continue')} — Resume from last session")
-                print(f"  {c(C.CYAN, '/sessions')} — List saved sessions")
-                print(f"  {c(C.CYAN, '/tools')}    — List available tools")
-                print(f"  {c(C.CYAN, '/skills')}   — List registered skills (ready vs inactive)")
-                print(f"  {c(C.CYAN, '/mcp')}      — List connected MCP servers")
-                print(f"  {c(C.CYAN, '/image')}    — Attach an image (Ctrl+V or Alt+V also works)")
-                print(f"  {c(C.CYAN, '/agents')}   — List named agents")
-                print(f"  {c(C.CYAN, '/agent')}    — Show/switch active agent")
-                print(f"  {c(C.CYAN, '/model')}    — Show/switch provider & model")
-                print(f"  {c(C.CYAN, '/<skill>')}  — Invoke a skill by name (e.g. /skill-creator)")
-                print(f"  {c(C.CYAN, '/exit')}     — Exit")
-                continue
-            else:
-                # Try resolving as a skill name (Claude-Code-style /<name>).
-                # If a skill matches, inline its body as a synthetic user
-                # prompt and fall through to the LLM call. Otherwise show
-                # an "unknown command" hint with the closest skill name.
-                skill_name = cmd[1:]
-                skill = get_skill(skill_name)
-                if skill is None:
-                    from difflib import get_close_matches
-                    suggestion = get_close_matches(
-                        skill_name, [s.name for s in list_skills()], n=1
-                    )
-                    hint = f" Did you mean /{suggestion[0]}?" if suggestion else ""
-                    print(c(C.GRAY, f"  Unknown command: {cmd}.{hint}"))
-                    continue
-
-                skill_args = (
-                    user_input.split(maxsplit=1)[1] if len(parts) > 1 else ""
-                )
-                missing = [b for b in skill.requires_bins if not shutil.which(b)]
-                if missing:
-                    print(
-                        f"  {c(C.YELLOW, '⚠')} Skill '{skill.name}' requires "
-                        f"bins not on PATH: {', '.join(missing)}"
-                    )
-                user_input = (
-                    f"[Skill invoked via /{skill.name}]\n"
-                    "--- BEGIN SKILL INSTRUCTIONS ---\n"
-                    f"{skill.body}\n"
-                    "--- END SKILL INSTRUCTIONS ---\n\n"
-                    f"User input: {skill_args or '(no additional args)'}\n"
-                    "Follow the skill's instructions above to handle this."
-                )
-                print(
-                    f"  {c(C.GREEN, '✦')} Loaded skill: "
-                    f"{c(C.CYAN, skill.name)} "
-                    f"{c(C.GRAY, f'({len(skill.body)} chars)')}"
-                )
-                # Fall through (no continue) — LLM call handles user_input below.
+            # FALL_THROUGH — handler transformed the input. Use the
+            # override values for the LLM call below.
+            if ctx.user_input_override is not None:
+                user_input = ctx.user_input_override
+            if ctx.image_paths_override is not None:
+                image_paths = ctx.image_paths_override
+            _history_record_override = ctx.history_record_override
+        else:
+            _history_record_override = None
 
         # Inject CWD context
         cwd = os.getcwd()
@@ -657,7 +277,13 @@ def run_repl(provider: str, temperature: float):
             pass
 
         messages.append({"role": "user", "content": user_content})
-        history.append({"role": "user", "content": user_input})
+        # `/image` rewrites the history entry to include the filename so
+        # /history doesn't show a giant base64 blob; other commands fall
+        # through with override=None and we just record the raw input.
+        history.append(
+            {"role": "user",
+             "content": _history_record_override or user_input}
+        )
 
         print()
         try:
