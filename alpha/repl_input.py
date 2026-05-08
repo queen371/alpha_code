@@ -103,8 +103,8 @@ def _bottom_toolbar() -> "ANSI":
 
     if is_auto_accept():
         text = (
-            f" {c(C.GREEN + C.BOLD, '»»')} "
-            f"{c(C.GREEN + C.BOLD, 'accept edits on')} "
+            f" {c(C.AMBER_SOFT + C.BOLD, '»»')} "
+            f"{c(C.AMBER_SOFT + C.BOLD, 'accept edits on')} "
             f"{c(C.GRAY, '(shift+tab to cycle) · ctrl+c to interrupt')}"
         )
     else:

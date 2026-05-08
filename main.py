@@ -198,7 +198,7 @@ def run_repl(provider: str, temperature: float):
                     announced_thresholds.add(_t)
                     break
             ctx_chip = format_context_indicator(messages, provider)
-            prompt = f"{ctx_chip}{c(C.GREEN + C.BOLD, '❯')} "
+            prompt = f"{ctx_chip}{c(C.VIOLET + C.BOLD, '❯')} "
             user_input, image_paths = read_input(prompt)
             user_input = user_input.strip()
         except (KeyboardInterrupt, EOFError):

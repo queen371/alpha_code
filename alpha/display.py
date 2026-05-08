@@ -44,6 +44,19 @@ class C:
     BLUE = "\033[38;5;33m"        # Blue (info)
     CYAN = "\033[38;5;51m"        # Cyan (tool names)
     MAGENTA = "\033[38;5;135m"    # Purple (sub-agents)
+
+    # Refined violet palette — the Alpha brand color. Picked over the
+    # pinker MAGENTA(#af5fff) because the blue undertone reads as alive
+    # rather than carnival-bright. VIOLET_GLOW is the breathe-peak shade
+    # for the thinking-indicator pulse.
+    VIOLET = "\033[38;5;99m"        # #875fff (main brand, electric)
+    VIOLET_GLOW = "\033[38;5;141m"  # #af87ff (lavender, pulse peak)
+    VIOLET_DARK = "\033[38;5;61m"   # #5f5faf (muted indigo, borders)
+
+    # Soft amber for the accept-edits status chip — distinct from the
+    # brand violet so the user can spot the mode at a glance, but
+    # desaturated enough not to feel like an alert.
+    AMBER_SOFT = "\033[38;5;180m"   # #d7af87 (muted gold)
     WHITE = "\033[38;5;255m"      # Bright white
     GRAY = "\033[38;5;245m"       # Medium gray
     GRAY_DARK = "\033[38;5;238m"  # Dark gray (borders)
@@ -414,7 +427,7 @@ def print_approval_request(tool_name: str, args: dict) -> bool:
 
 def print_phase(detail: str) -> None:
     """Display a phase/progress update."""
-    print(f"  {c(C.GREEN_DARK, '→')} {c(C.DIM, detail)}")
+    print(f"  {c(C.VIOLET_DARK, '→')} {c(C.DIM, detail)}")
 
 
 def print_error(message: str) -> None:
@@ -594,14 +607,14 @@ def print_banner(provider: str, model: str) -> None:
 
     from . import __version__
 
-    print(c(C.MAGENTA + C.BOLD, banner))
+    print(c(C.VIOLET + C.BOLD, banner))
     print(
-        f"  {c(C.GREEN_DARK, '│')} {c(C.WHITE + C.BOLD, 'ALPHA CODE')} "
-        f"{c(C.GREEN, f'v{__version__}')} {c(C.GRAY, '— Terminal Agent')}"
+        f"  {c(C.VIOLET_DARK, '│')} {c(C.WHITE + C.BOLD, 'ALPHA CODE')} "
+        f"{c(C.VIOLET_GLOW, f'v{__version__}')} {c(C.GRAY, '— Terminal Agent')}"
     )
-    print(f"  {c(C.GREEN_DARK, '│')} {c(C.GRAY, 'cwd:')} {c(C.GREEN, cwd)}")
-    print(f"  {c(C.GREEN_DARK, '│')} {c(C.GRAY, 'provider:')} {c(C.CYAN, f'{provider} ({model})')}")
-    print(f"  {c(C.GREEN_DARK, '│')} {c(C.GRAY, 'Commands:')} /clear /history /continue /tools /model /help /exit")
+    print(f"  {c(C.VIOLET_DARK, '│')} {c(C.GRAY, 'cwd:')} {c(C.VIOLET, cwd)}")
+    print(f"  {c(C.VIOLET_DARK, '│')} {c(C.GRAY, 'provider:')} {c(C.CYAN, f'{provider} ({model})')}")
+    print(f"  {c(C.VIOLET_DARK, '│')} {c(C.GRAY, 'Commands:')} /clear /history /continue /tools /model /help /exit")
     print()
 
 
@@ -957,7 +970,11 @@ class ThinkingIndicator:
             paren = ""
 
         spinner_part = c(C.ORANGE + C.BOLD, frame)
-        verb_part = c(C.WHITE + C.BOLD, f"{verb}…")
+        # Breathe between two close violet shades over a 2-second cycle —
+        # alive but not flicker-y. `int(elapsed * 2) % 4` ticks once per
+        # 0.5s, giving 1s VIOLET / 1s VIOLET_GLOW.
+        verb_color = C.VIOLET_GLOW if int(elapsed * 2) % 4 >= 2 else C.VIOLET
+        verb_part = c(verb_color + C.BOLD, f"{verb}…")
         return f"{spinner_part} {verb_part}{paren}"
 
     # (suffix-shown, plain-text-length used for the column-fit check). Picks
@@ -975,8 +992,8 @@ class ThinkingIndicator:
             return ""
         cols = self._term_cols or self._detect_size()[1]
         prefix = (
-            f"{c(C.GREEN + C.BOLD, '▸▸')} "
-            f"{c(C.GREEN + C.BOLD, 'accept edits on')}"
+            f"{c(C.AMBER_SOFT + C.BOLD, '▸▸')} "
+            f"{c(C.AMBER_SOFT + C.BOLD, 'accept edits on')}"
         )
         for suffix, min_cols in self._STATUS_VARIANTS:
             if cols >= min_cols:
