@@ -502,44 +502,53 @@ def print_subagent_event(event: dict, agent_label: str = "") -> None:
 
 
 def print_tools_list(tools: list[dict]) -> None:
-    """Display tools grouped by category with safety indicators."""
+    """Display tools grouped by category with safety indicators.
+
+    Uses the tool registry for canonical category names, falling back
+    to name-prefix inference for unregistered tools (shouldn't happen).
+    """
     if not tools:
         print(c(C.GRAY, "  No tools loaded."))
         return
 
-    # Group by category
+    from alpha.tools import get_tool
+
+    # Group by registry category
     categories: dict[str, list[dict]] = {}
     for t in tools:
         fn = t.get("function", {})
-        # Try to get category from description or name patterns
         name = fn.get("name", "")
-        desc = fn.get("description", "")
 
-        # Infer category from tool name prefix
-        cat = "general"
-        for prefix in ("read_file", "write_file", "edit_file", "list_directory",
-                        "search_files", "glob_files", "search_and_replace"):
-            if name == prefix:
-                cat = "file"
-                break
-        if name.startswith("git_"):
-            cat = "git"
-        elif name.startswith("execute_shell"):
-            cat = "shell"
-        elif name.startswith("execute_python") or name.startswith("code_"):
-            cat = "code"
-        elif name.startswith("http_") or name.startswith("web_") or name.startswith("dns_"):
-            cat = "network"
-        elif name.startswith("query_") or name.startswith("db_"):
-            cat = "database"
-        elif name.startswith("delegate_"):
-            cat = "agent"
-        elif name in ("project_overview", "run_tests", "deploy_check"):
-            cat = "pipeline"
-        elif name.startswith("search"):
-            cat = "search"
-        elif name.startswith("system_") or name.startswith("env_"):
-            cat = "system"
+        # Primary: registry lookup for canonical category
+        td = get_tool(name)
+        if td and td.category:
+            cat = td.category
+        else:
+            # Fallback: name-prefix inference (shouldn't be needed)
+            cat = "general"
+            if name.startswith("git_"):
+                cat = "git"
+            elif name.startswith("execute_shell"):
+                cat = "shell"
+            elif name.startswith("execute_python") or name.startswith("code_"):
+                cat = "code"
+            elif name.startswith("http_") or name.startswith("web_") or name.startswith("dns_"):
+                cat = "network"
+            elif name.startswith("query_") or name.startswith("db_"):
+                cat = "database"
+            elif name.startswith("delegate_"):
+                cat = "agent"
+            elif name.startswith("system_") or name.startswith("env_"):
+                cat = "system"
+            elif name.startswith("browser_"):
+                cat = "browser"
+            elif name.startswith("search"):
+                cat = "search"
+            elif name in ("project_overview", "run_tests", "deploy_check", "search_and_replace"):
+                cat = "composite"
+            elif name in ("read_file", "write_file", "edit_file", "list_directory",
+                          "search_files", "glob_files"):
+                cat = "filesystem"
 
         categories.setdefault(cat, []).append(fn)
 
