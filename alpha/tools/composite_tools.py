@@ -27,7 +27,7 @@ from ..executor import (
 )
 from . import ToolDefinition, ToolSafety, get_tool, register_tool
 from .file_tools import _validate_path_no_symlink
-from .workspace import AGENT_WORKSPACE
+from .workspace import AGENT_WORKSPACE, assert_within_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -89,10 +89,9 @@ async def _project_overview(path: str = None) -> dict:
     target = path or str(AGENT_WORKSPACE)
     target_path = Path(target).expanduser().resolve()
 
-    try:
-        target_path.relative_to(AGENT_WORKSPACE)
-    except ValueError:
-        return _violation(f"Path fora do workspace permitido ({AGENT_WORKSPACE})")
+    err = assert_within_workspace(target_path)
+    if err:
+        return _violation(err)
 
     results = {}
 
@@ -159,10 +158,9 @@ async def _run_tests(
     target = path or str(AGENT_WORKSPACE)
     target_path = Path(target).expanduser().resolve()
 
-    try:
-        target_path.relative_to(AGENT_WORKSPACE)
-    except ValueError:
-        return _violation(f"Path fora do workspace permitido ({AGENT_WORKSPACE})")
+    err = assert_within_workspace(target_path)
+    if err:
+        return _violation(err)
 
     # Auto-detect framework
     if framework == "auto":

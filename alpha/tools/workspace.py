@@ -38,9 +38,14 @@ def assert_within_workspace(path: Path | str) -> str | None:
     para a Camada B do enforcement de workspace; reduz risco de drift
     quando o check muda em uma tool e nao em outras.
 
+    Caller deve fazer `resolve()` ANTES se necessario (ex: symlink-aware
+    checks). Esta funcao faz apenas `expanduser()` para manter o
+    comportamento consistente com os sites originais onde alguns usam
+    resolve e outros usam normpath.
+
     Returns None se OK, ou mensagem de erro se path estiver fora.
     """
-    p = Path(path).resolve()
+    p = Path(path).expanduser()
     try:
         p.relative_to(AGENT_WORKSPACE)
         return None

@@ -14,7 +14,7 @@ from .path_helpers import (
     _validate_path,
     _validate_path_no_symlink,
 )
-from .workspace import AGENT_WORKSPACE
+from .workspace import AGENT_WORKSPACE, assert_within_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -388,9 +388,7 @@ async def _glob_files(pattern: str, path: str = ".") -> dict:
         # #D025: workspace dentro do glob — se p contem symlink que aponta
         # para fora, glob seguiria e listaria filenames externos. read_file
         # depois bloquearia, mas o filename ja vazou estrutura externa.
-        try:
-            match.resolve().relative_to(AGENT_WORKSPACE)
-        except (ValueError, OSError):
+        if assert_within_workspace(match.resolve()):
             skipped_outside += 1
             continue
         info = {"path": str(match), "type": "dir" if match.is_dir() else "file"}
@@ -444,7 +442,9 @@ async def _write_file(path: str, content: str) -> dict:
         p.parent.mkdir(parents=True, exist_ok=True)
         # Re-validate resolved path after mkdir (directory could have been swapped)
         p_resolved = Path(path).expanduser().resolve()
-        p_resolved.relative_to(AGENT_WORKSPACE)
+        err = assert_within_workspace(p_resolved)
+        if err:
+            raise PermissionError(err)
         # Atomic write: O_NOFOLLOW prevents symlink race between validate and open
         data = content.encode("utf-8")
         flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
@@ -485,7 +485,9 @@ async def _edit_file(path: str, old_text: str, new_text: str) -> dict:
         updated = original.replace(old_text, new_text, 1)
         # Re-validate before write (defense against TOCTOU race)
         p_resolved = Path(path).expanduser().resolve()
-        p_resolved.relative_to(AGENT_WORKSPACE)
+        err = assert_within_workspace(p_resolved)
+        if err:
+            raise PermissionError(err)
         # Atomic write with O_NOFOLLOW to prevent symlink race
         data = updated.encode("utf-8")
         flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW

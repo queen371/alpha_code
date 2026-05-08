@@ -149,6 +149,15 @@ def _recover_tool_call_from_content(content: str) -> dict | None:
     else:
         return None
 
+    # DL028: validate that the recovered tool name actually exists in the
+    # registry. Ollama models can hallucinate tool names; passing them
+    # forward reaches the executor which sees unknown_tool and wastes an
+    # iteration. Better to discard here so the LLM emits a real one.
+    from .tools import get_tool
+    if get_tool(name) is None:
+        logger.debug("Recovered tool call '%s' not in registry — discarding", name)
+        return None
+
     # Determinismo por input vence hash() (seed-randomizado entre processos).
     # `usedforsecurity=False` silencia bandit/ruff B324 — uso e id de tool call,
     # nao hash criptografico.

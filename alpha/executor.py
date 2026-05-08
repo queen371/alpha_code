@@ -162,6 +162,11 @@ def _record_skip(tc: dict, tool_name: str, result: dict, messages: list[dict]) -
 
 
 def _record_result(tc: dict, tool_name: str, result: dict, messages: list[dict]) -> None:
+    # DL033: tools that return {"error": "..."} on their own (git, db, file
+    # tools) don't get the {ok: false, category: ...} invariant added by the
+    # executor. Annotate here so the model always sees a consistent error shape.
+    if isinstance(result, dict) and "error" in result and "ok" not in result:
+        result = _annotate_error(result, "tool_error")
     _append_tool_msg(messages, tc["id"], result, tool_name)
 
 

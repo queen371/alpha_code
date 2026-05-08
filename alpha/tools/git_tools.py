@@ -42,6 +42,7 @@ _ALLOWED_GIT_FLAGS = {
     "show": {"--stat", "--no-color", "--format", "--pretty"},
     "push": {"--set-upstream", "-u", "--tags"},
     "reset": {"--soft", "--mixed"},  # --hard requer aprovação via _needs_approval
+    "tag_create": {"-a", "--annotate", "-m", "--message"},  # DL035
 }
 
 # Flags globalmente bloqueadas (escape do workspace / configuração)

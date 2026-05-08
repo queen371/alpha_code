@@ -133,8 +133,7 @@ class TestGlobWorkspaceFilter:
         from alpha.tools import file_tools
 
         src = inspect.getsource(file_tools._glob_files)
-        assert "relative_to" in src
-        assert "AGENT_WORKSPACE" in src
+        assert "assert_within_workspace" in src
 
     @pytest.mark.asyncio
     async def test_normal_glob_still_works(self, tmp_path, monkeypatch):

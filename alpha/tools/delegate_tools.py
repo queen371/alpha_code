@@ -162,7 +162,7 @@ async def _run_subagent(
     try:
         scratch_dir = _create_scratch_dir(workspace_root, agent_id)
     except OSError as e:
-        return {"error": f"Cannot create scratch dir for sub-agent: {e}"}
+        return {"ok": False, "category": "io_error", "error": f"Cannot create scratch dir for sub-agent: {e}"}
 
     # Build isolated context for the sub-agent
     system_prompt = _load_subagent_prompt()
@@ -180,8 +180,8 @@ async def _run_subagent(
         "You may read anything under the workspace using relative paths.\n\n"
     )
     if context:
-        task_content += f"Context: {context}\n\n"
-    task_content += task
+        task_content += f"Context: {_strip_control_chars(context)}\n\n"
+    task_content += _strip_control_chars(task)
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -282,6 +282,8 @@ async def _run_subagent(
         except OSError:
             pass
         return {
+            "ok": False,
+            "category": "subagent_error",
             "error": f"Sub-agent execution failed: {type(e).__name__}: {e}",
             "agent_id": agent_id,
         }
@@ -313,9 +315,9 @@ async def _delegate_task(
 ) -> dict:
     """Spawn a single sub-agent to handle a task."""
     if not FEATURES.get("multi_agent_enabled"):
-        return {"error": "Multi-agent system is disabled. Set FEATURES['multi_agent_enabled']=True."}
+        return {"ok": False, "category": "feature_disabled", "error": "Multi-agent system is disabled. Set FEATURES['multi_agent_enabled']=True."}
     if not FEATURES.get("delegate_tool_enabled"):
-        return {"error": "Delegate tool is disabled. Enable 'delegate_tool_enabled' in config."}
+        return {"ok": False, "category": "feature_disabled", "error": "Delegate tool is disabled. Enable 'delegate_tool_enabled' in config."}
     return await _run_subagent(task, context, tools_filter, provider)
 
 
@@ -329,17 +331,17 @@ async def _delegate_parallel(
 ) -> dict:
     """Spawn multiple sub-agents in parallel, each handling one task."""
     if not FEATURES.get("multi_agent_enabled"):
-        return {"error": "Multi-agent system is disabled. Set FEATURES['multi_agent_enabled']=True."}
+        return {"ok": False, "category": "feature_disabled", "error": "Multi-agent system is disabled. Set FEATURES['multi_agent_enabled']=True."}
     if not FEATURES.get("delegate_tool_enabled"):
-        return {"error": "Delegate tool is disabled. Enable 'delegate_tool_enabled' in config."}
+        return {"ok": False, "category": "feature_disabled", "error": "Delegate tool is disabled. Enable 'delegate_tool_enabled' in config."}
 
     # Parse tasks JSON array
     try:
         task_list = json.loads(tasks)
         if not isinstance(task_list, list) or not task_list:
-            return {"error": "tasks must be a non-empty JSON array of strings"}
+            return {"ok": False, "category": "invalid_args", "error": "tasks must be a non-empty JSON array of strings"}
     except json.JSONDecodeError as e:
-        return {"error": f"Invalid JSON in tasks: {e}"}
+        return {"ok": False, "category": "invalid_args", "error": f"Invalid JSON in tasks: {e}"}
 
     # Cap total: max_parallel_agents so controla concorrencia, nao total.
     # Sem cap, modelo pode submeter array de 100 tarefas — runaway de custo

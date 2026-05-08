@@ -28,9 +28,10 @@ def _no_workspace_leaks():
 
 
 def _patch_workspace(monkeypatch, ws: Path):
-    from alpha.tools import pipeline_tools
+    from alpha.tools import pipeline_tools, workspace as ws_module
 
     monkeypatch.setattr(pipeline_tools, "AGENT_WORKSPACE", ws)
+    monkeypatch.setattr(ws_module, "AGENT_WORKSPACE", ws)
 
 
 class TestOpenRedirectFiles:
