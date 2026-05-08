@@ -9,10 +9,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from .._registry import FileBackedRegistry
+from ..config import _PROJECT_ROOT  # #095: fonte unica
 from .loader import load_agent_file
 from .scope import AgentScope
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _SEARCH_PATHS = [
     _PROJECT_ROOT / "agents",
     Path.home() / ".alpha" / "agents",

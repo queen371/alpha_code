@@ -224,11 +224,27 @@ async def _fetch_raw(url: str, timeout: float, max_bytes: int) -> tuple[bytes, d
         return b"", {}, 0
 
 
+# #D022: TTL cache para evitar re-extracao de URLs comuns dentro de uma
+# mesma sessao (Wikipedia, MDN, docs.python.org sao re-baixados quando o
+# usuario refina a query). 30s e curto o suficiente para nao servir
+# conteudo stale, longo o suficiente para cobrir N refinamentos seguidos.
+_EXTRACT_CACHE: dict[str, tuple[float, str]] = {}
+_EXTRACT_CACHE_TTL = 30.0  # seconds
+_EXTRACT_CACHE_MAX = 100
+
+
 async def extract_page_content(url: str, timeout: float = 10.0, max_chars: int = 8000) -> str:
     """
     Busca URL e extrai texto principal.
     Tenta trafilatura primeiro, fallback para strip HTML básico.
     """
+    import time as _time
+    now = _time.monotonic()
+    cache_key = f"{url}|{max_chars}"
+    cached = _EXTRACT_CACHE.get(cache_key)
+    if cached and (now - cached[0]) < _EXTRACT_CACHE_TTL:
+        return cached[1]
+
     raw, headers, status = await _fetch_raw(url, timeout, MAX_DOWNLOAD_BYTES)
     if not raw:
         return ""
@@ -258,7 +274,15 @@ async def extract_page_content(url: str, timeout: float = 10.0, max_chars: int =
         if not fallback_used:
             logger.info(f"extract_page_content fell back to HTML strip for {url}")
 
-    return text[:max_chars]
+    result = text[:max_chars]
+
+    # Insert into cache; eviction quando passa de _EXTRACT_CACHE_MAX
+    _EXTRACT_CACHE[cache_key] = (now, result)
+    if len(_EXTRACT_CACHE) > _EXTRACT_CACHE_MAX:
+        oldest_key = min(_EXTRACT_CACHE, key=lambda k: _EXTRACT_CACHE[k][0])
+        _EXTRACT_CACHE.pop(oldest_key, None)
+
+    return result
 
 
 # Pre-compiladas: o cache interno do `re` (limite 512) podia evictar essas em

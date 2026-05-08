@@ -6,9 +6,10 @@ appends new keys at the end.
 
 from __future__ import annotations
 
-from pathlib import Path
+# #095: importa de config em vez de duplicar `Path(__file__).parent...`.
+# 4 modulos definiam o mesmo _PROJECT_ROOT separadamente.
+from ..config import _PROJECT_ROOT
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 ENV_PATH = _PROJECT_ROOT / ".env"
 
 

@@ -1,5 +1,5 @@
 # STATUS DO PROJETO — Alpha Code
-> Ultima atualizacao: 2026-05-07 22:00
+> Ultima atualizacao: 2026-05-07 23:00
 > Atualizado por: Claude Code (status-update)
 
 ---
@@ -7,7 +7,7 @@
 ## Estado Geral: TODOS OS CRITICOS+ALTOS+V2.0 FECHADOS
 
 ### Resumo
-0 CRITICOs e 0 ALTOs ativos. **Todos os 6 audits DEEP V2.0 fechados na sua leva nova** (BUGS 9/9, LOGIC 9/9, MAINTAINABILITY 7/8 + DM001 deferido, PERFORMANCE 13/13, RESILIENCE 9/9, SECURITY 12/12). Restam apenas **stragglers V1.0/V1.1** referenciados nos planos dos DEEPs mas nao endereçados na rodada V2.0 (~70 MEDIOs/BAIXOs distribuidos). Suite **257/257 verde** (+13 testes nos ultimos 6 fixes), CI ativo (Py 3.11+3.12).
+0 CRITICOs e 0 ALTOs ativos. **Todos os 6 audits DEEP V2.0 fechados na sua leva nova** (BUGS 9/9, LOGIC 9/9, MAINTAINABILITY 7/8 + DM001 deferido, PERFORMANCE 13/13, RESILIENCE 9/9, SECURITY 12/12). Restam apenas **stragglers V1.0/V1.1** referenciados nos planos dos DEEPs mas nao endereçados na rodada V2.0 (~64 MEDIOs/BAIXOs distribuidos — diminui a cada sprint de quick wins). Suite **388/388 verde** (+15 testes neste sprint), CI ativo (Py 3.11+3.12).
 
 ---
 
@@ -27,6 +27,7 @@ Nenhuma issue ALTO pendente. Todos os 14 ALTOs originais (V1.1 + DEEPs V2.0) fec
 
 | Commit | O que fechou |
 |--------|--------------|
+| (workdir 2026-05-07 23h) | **MAINT + PERF quick wins batch 2** — 6 fixes: #DM007 (.env.example completo), #086 (wizard `_PROVIDERS` derivado de config), #095 (`_PROJECT_ROOT` compartilhado), #096 (tools index docstring), #D010 (display constants centralizados), #D022 (extract TTL cache 30s/100). +15 testes em `test_maint_perf_quick_wins_2.py`. |
 | (workdir 2026-05-07 22h) | **MAINT + PERF quick wins** — 14 fixes (DM004/DM005 dead imports, DM014 script_path init, ALPHA_FEATURES alias removed, #083 dedupe, #085 LOOP_DETECTION dict, #090 shlex.quote, #091 comment, #093 docstring, #094 bin/alpha msg, #097 LIMITS dict, #D013 PG SSRF helper, #D005 fuzzy cache) + 4 verificadas pre-fechadas (DM003, D015, D017, #099). +20 testes. |
 | `68cdafc` | **DEEP_PERFORMANCE V1.0 stragglers** — 8 fixes + 2 verificadas pre-fechadas. +17 testes. |
 | `db75078` | **DEEP_BUGS V1.0 stragglers** — todas as 9 issues #D022–#D030 fechadas. +16 testes. |
@@ -66,8 +67,8 @@ Nenhuma issue ALTO pendente. Todos os 14 ALTOs originais (V1.1 + DEEPs V2.0) fec
 |------|--------------|------------------------------------|-----|
 | **DEEP_BUGS** | #D013–#D030 (18/18) ✅ | — | [DEEP_BUGS](audits/current/DEEP_BUGS.md) |
 | **DEEP_LOGIC** | #DL012–#DL020 (9/9) ✅ | — | [DEEP_LOGIC](audits/current/DEEP_LOGIC.md) |
-| **DEEP_MAINTAINABILITY** | 7/8 + #DM001 deferido | refators grandes restantes (#D001–#D004 subprocess/security/timeout consolidation, #028 path validation, #030/#081/#082 splits, #086 wizard sync, #088 display split, #DM007/#DM012/#DM015/#DM016, #D006/#D007/#D008/#D009/#D010 V1.0 maint, #084/#086/#088/#092/#095/#096) (~20 restantes) | [DEEP_MAINTAINABILITY](audits/current/DEEP_MAINTAINABILITY.md) |
-| **DEEP_PERFORMANCE** | 13/13 ✅ | #025/#071 (search_files ripgrep, 45min), #D008 (aiohttp shared), #D022 (extract cache), #026/#076 (LLM client) (~4 restantes) | [DEEP_PERFORMANCE](audits/current/DEEP_PERFORMANCE.md) |
+| **DEEP_MAINTAINABILITY** | 7/8 + #DM001 deferido | refators grandes restantes (#D001–#D004 subprocess/security/timeout consolidation, #028 path validation, #030/#081/#082 splits, #088 display split, #DM012/#DM015/#DM016, #D006/#D007/#D008/#D009 V1.0 maint, #084/#088/#092) (~14 restantes) | [DEEP_MAINTAINABILITY](audits/current/DEEP_MAINTAINABILITY.md) |
+| **DEEP_PERFORMANCE** | 13/13 ✅ | #025/#071 (search_files ripgrep, 45min), #D008 (aiohttp shared), #026/#076 (LLM client) (~3 restantes) | [DEEP_PERFORMANCE](audits/current/DEEP_PERFORMANCE.md) |
 | **DEEP_RESILIENCE** | #D013–#D021 (9/9) ✅ | #D008 (rate limits design) — restantes pendentes V1.0/V1.1 todos fechados nos 2 sprints | [DEEP_RESILIENCE](audits/current/DEEP_RESILIENCE.md) |
 | **DEEP_SECURITY** | 12/12 ✅ | #023 (browser allowlist policy), #025/#026 (deps CVE remaining), #036 (deps upper bound), #D014 (manifest plugins), #115 V1.1 (env perms verified) (~5 restantes) | [DEEP_SECURITY](audits/current/DEEP_SECURITY.md) |
 

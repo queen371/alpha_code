@@ -6,6 +6,26 @@ Supports:
 - External plugins from plugins/
 - Category and mode filtering
 - Runtime enable/disable
+
+Tool module index (where each tool lives, see #096):
+- file_tools.py    — read_file, write_file, edit_file, search_files,
+                     glob_files, list_directory, move_file, delete_file
+- shell_tools.py   — execute_shell
+- pipeline_tools.py — execute_pipeline
+- code_tools.py    — execute_python, install_package
+- git_tools.py     — git_operation
+- network_tools.py — http_request
+- web_tools.py     — web_search, extract_page_content
+- database_tools.py — query_database, list_tables, describe_table
+- composite_tools.py — project_overview, run_tests, search_and_replace,
+                       deploy_check
+- system_tools.py  — clipboard_read, clipboard_write, screenshot,
+                     get_system_info, get_battery_status, etc.
+- browser_tools.py — browser_navigate, browser_click, browser_fill, etc.
+- delegate_tools.py — delegate_task, delegate_parallel
+- plan_tools.py    — present_plan, todo_write
+- skill_tools.py   — load_skill
+- apify_tools.py   — apify_run_actor, apify_search_actors
 """
 
 import importlib

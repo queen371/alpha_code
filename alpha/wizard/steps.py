@@ -7,34 +7,21 @@ from pathlib import Path
 from ..display import C, c
 from .prompts import ask, ask_choice, ask_secret, ask_yes_no
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+from ..config import _PROJECT_ROOT, _PROVIDERS as _CONFIG_PROVIDERS
+
 _AGENTS_DIR = _PROJECT_ROOT / "agents"
 
+# #086: derivar do config.py em vez de duplicar. Wizard mostrava lista
+# desatualizada (4 entries) com modelo default divergente (qwen2.5-coder:14b
+# vs config.py qwen-heavy-abliterated:32b). Agora a fonte unica.
 _PROVIDERS = [
     {
-        "id": "deepseek",
-        "api_key_env": "DEEPSEEK_API_KEY",
-        "model_env": "DEEPSEEK_MODEL",
-        "default_model": "deepseek-chat",
-    },
-    {
-        "id": "openai",
-        "api_key_env": "OPENAI_API_KEY",
-        "model_env": "OPENAI_MODEL",
-        "default_model": "gpt-4o",
-    },
-    {
-        "id": "grok",
-        "api_key_env": "GROK_API_KEY",
-        "model_env": "GROK_MODEL",
-        "default_model": "grok-4-1-fast-reasoning",
-    },
-    {
-        "id": "ollama",
-        "api_key_env": None,
-        "model_env": "OLLAMA_MODEL",
-        "default_model": "qwen2.5-coder:14b",
-    },
+        "id": pid,
+        "api_key_env": cfg.get("api_key_env"),
+        "model_env": cfg.get("model_env"),
+        "default_model": cfg["default_model"],
+    }
+    for pid, cfg in _CONFIG_PROVIDERS.items()
 ]
 
 

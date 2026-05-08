@@ -11,6 +11,16 @@ import os
 import sys
 import time
 
+# ─── Display truncation constants (#D010 V1.0) ───
+#
+# Antes esses limites viviam inline em ~6 funcoes diferentes (`[:200]`,
+# `[:120]`, `[:97]+"..."`, `max_lines = 8`). Centralizar em um lugar
+# unico permite ajuste consistente e elimina mismatches silenciosos.
+DISPLAY_LINE_TRUNCATE = 200       # max chars per terminal line
+DISPLAY_PREVIEW_TRUNCATE = 120    # last-reply preview / TUI status
+DISPLAY_PROMPT_VALUE_TRUNCATE = 100  # approval prompt arg values (followed by ...)
+DISPLAY_MAX_LINES = 8             # max lines from a tool result
+
 
 # ─── ANSI Colors (Kali Linux palette) ───
 
@@ -157,13 +167,13 @@ def print_tool_result(name: str, result: dict) -> None:
     if isinstance(result, dict):
         # Error results in red
         if result.get("error"):
-            print(f"  {c(C.RED, '✗')} {c(C.RED, str(result['error'])[:200])}")
+            print(f"  {c(C.RED, '✗')} {c(C.RED, str(result['error'])[:DISPLAY_LINE_TRUNCATE])}")
             return
 
         # Skipped/denied results
         if result.get("skipped"):
             reason = result.get("reason", "denied")
-            print(f"  {c(C.YELLOW, '⊘')} {c(C.YELLOW, reason[:200])}")
+            print(f"  {c(C.YELLOW, '⊘')} {c(C.YELLOW, reason[:DISPLAY_LINE_TRUNCATE])}")
             return
 
         # todo_write — render checklist
@@ -178,20 +188,19 @@ def print_tool_result(name: str, result: dict) -> None:
         output = result.get("output") or result.get("content") or result.get("result")
         if isinstance(output, str) and output.strip():
             lines = output.strip().split("\n")
-            max_lines = 8
-            for line in lines[:max_lines]:
-                print(f"  {border} {line[:200]}")
-            if len(lines) > max_lines:
-                remaining = len(lines) - max_lines
+            for line in lines[:DISPLAY_MAX_LINES]:
+                print(f"  {border} {line[:DISPLAY_LINE_TRUNCATE]}")
+            if len(lines) > DISPLAY_MAX_LINES:
+                remaining = len(lines) - DISPLAY_MAX_LINES
                 print(f"  {border} {c(C.GRAY, f'... ({remaining} more lines)')}")
         else:
             # Show as compact JSON
             preview = json.dumps(result, ensure_ascii=False, default=str)
-            if len(preview) > 200:
-                preview = preview[:197] + "..."
+            if len(preview) > DISPLAY_LINE_TRUNCATE:
+                preview = preview[:DISPLAY_LINE_TRUNCATE - 3] + "..."
             print(f"  {border} {c(C.GRAY, preview)}")
     else:
-        result_str = str(result)[:200]
+        result_str = str(result)[:DISPLAY_LINE_TRUNCATE]
         print(f"  {border} {result_str}")
 
 
@@ -215,8 +224,8 @@ def _print_plan_card(args: dict) -> None:
     print(f"  {c(C.YELLOW, '│')}")
     for i, step in enumerate(steps, start=1):
         text = str(step)
-        if len(text) > 100:
-            text = text[:97] + "..."
+        if len(text) > DISPLAY_PROMPT_VALUE_TRUNCATE:
+            text = text[:DISPLAY_PROMPT_VALUE_TRUNCATE - 3] + "..."
         print(f"  {c(C.YELLOW, '│')} {c(C.GRAY, f'{i:>2}.')} {text}")
     print(f"  {c(C.YELLOW + C.BOLD, '└──────────────────────────────────────')}")
 
@@ -245,8 +254,8 @@ def print_approval_request(tool_name: str, args: dict) -> bool:
         if isinstance(args, dict):
             for k, v in args.items():
                 val_str = str(v)
-                if len(val_str) > 100:
-                    val_str = val_str[:97] + "..."
+                if len(val_str) > DISPLAY_PROMPT_VALUE_TRUNCATE:
+                    val_str = val_str[:DISPLAY_PROMPT_VALUE_TRUNCATE - 3] + "..."
                 print(f"  {c(C.RED, '│')} {c(C.GRAY, k)}: {val_str}")
         print(f"  {c(C.RED + C.BOLD, '└────────────────────────────────────────')}")
 
@@ -319,7 +328,7 @@ def print_subagent_event(event: dict, agent_label: str = "") -> None:
         print(f"{prefix}{label} {icon} {c(C.CYAN, name)}{args_str}")
     elif event_type == "done":
         reply = event.get("reply", "")
-        preview = reply[:120].replace("\n", " ") if reply else ""
+        preview = reply[:DISPLAY_PREVIEW_TRUNCATE].replace("\n", " ") if reply else ""
         print(f"{prefix}{label} {c(C.GREEN, '✓')} {c(C.DIM, preview)}")
 
 
