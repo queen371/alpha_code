@@ -21,11 +21,12 @@ DEFAULT_PROVIDER = os.getenv("ALPHA_PROVIDER", "deepseek")
 # aqui em vez de viver isolado em FEATURES.
 LIMITS = {
     "max_iterations": 50,           # iteracoes do agent loop principal
-    "subagent_max_iterations": 15,  # iteracoes por sub-agent
     "tool_result_max_chars": 12_000,
     "llm_timeout": 300,             # seconds per LLM call
     "max_messages": 500,            # hard cap antes de needs_compression
 }
+# `subagent_max_iterations` vive em FEATURES (linha ~185) — `delegate_tools.py`
+# le de la. Manter dois lugares era drift garantido (#DM015 follow-up).
 
 MAX_ITERATIONS = LIMITS["max_iterations"]
 TOOL_RESULT_MAX_CHARS = LIMITS["tool_result_max_chars"]

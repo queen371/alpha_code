@@ -121,10 +121,12 @@ def _recover_tool_call_from_content(content: str) -> dict | None:
     else:
         return None
 
-    # SHA1 (truncado) em vez de hash() — Python's hash() e seed-randomizado
-    # entre processos, gerando ids instaveis ao replay/restore de sessao.
-    # SHA1 e deterministico por input, com colisao desprezivel para uma sessao.
-    digest = hashlib.sha1((name + args_str).encode("utf-8")).hexdigest()[:8]
+    # Determinismo por input vence hash() (seed-randomizado entre processos).
+    # `usedforsecurity=False` silencia bandit/ruff B324 — uso e id de tool call,
+    # nao hash criptografico.
+    digest = hashlib.sha1(
+        (name + args_str).encode("utf-8"), usedforsecurity=False
+    ).hexdigest()[:8]
     return {
         "id": f"call_recovered_{digest}",
         "name": name,

@@ -243,7 +243,7 @@ async def _run_once(messages, user_message, provider, temperature, get_tool_fn, 
     from alpha.agent import run_agent
 
     full_reply = ""
-    indicator = ThinkingIndicator("Pensando")
+    indicator = ThinkingIndicator("Thinking")
     indicator.start()
 
     try:
@@ -274,7 +274,7 @@ async def _run_once(messages, user_message, provider, temperature, get_tool_fn, 
             elif event_type == "tool_result":
                 indicator.stop()
                 print_tool_result(event["name"], event.get("result", {}))
-                indicator.start("Pensando")
+                indicator.start("Thinking")
 
             elif event_type == "approval_needed":
                 indicator.stop()
@@ -282,7 +282,7 @@ async def _run_once(messages, user_message, provider, temperature, get_tool_fn, 
             elif event_type == "context_compressed":
                 indicator.stop()
                 print_context_compressed(event.get("before", 0), event.get("after", 0))
-                indicator.start("Pensando")
+                indicator.start("Thinking")
 
             elif event_type == "done":
                 indicator.stop()

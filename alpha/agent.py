@@ -281,10 +281,13 @@ async def run_agent(
                         "before": tokens_before,
                         "after": tokens_after,
                     }
-            except (TimeoutError, asyncio.TimeoutError) as e:
-                # Compression chamada um LLM que estourou. Continua com
+            except TimeoutError as e:
+                # Compression chamou um LLM que estourou. Continua com
                 # contexto inflado — o hard truncate fallback (#062) cobre
-                # o caso onde isso vira loop.
+                # o caso onde isso vira loop. Em Python 3.11+ `asyncio.
+                # TimeoutError` e alias de TimeoutError, entao um unico
+                # handler ja cobre os dois caminhos sem precisar importar
+                # asyncio (que nao e usado em mais nada neste modulo).
                 logger.warning(
                     f"Context compression timeout: {e} — continuing without compression"
                 )

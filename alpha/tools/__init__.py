@@ -15,7 +15,7 @@ Tool module index (where each tool lives, see #096):
 - code_tools.py    — execute_python, install_package
 - git_tools.py     — git_operation
 - network_tools.py — http_request
-- web_tools.py     — web_search, extract_page_content
+- search_tools.py  — web_search, extract_page_content, search_files
 - database_tools.py — query_database, list_tables, describe_table
 - composite_tools.py — project_overview, run_tests, search_and_replace,
                        deploy_check

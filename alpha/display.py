@@ -473,7 +473,7 @@ class ThinkingIndicator:
     Call start() before work begins and stop() before printing other output.
     """
 
-    def __init__(self, label: str = "Pensando", style: str = "flower") -> None:
+    def __init__(self, label: str = "Thinking", style: str = "flower") -> None:
         self.label = label
         self.frames = _FLOWER_FRAMES if style == "flower" else _SPINNER_FRAMES
         self._task: asyncio.Task | None = None
@@ -517,7 +517,7 @@ class ThinkingIndicator:
                 frame = self.frames[i % len(self.frames)]
                 elapsed = time.monotonic() - self._start_time
                 dur = f" ({int(elapsed)}s)" if elapsed >= 1 else ""
-                line = f"\r{c(C.MAGENTA, frame)} {c(C.GRAY, self.label + dur)}\033[K"
+                line = f"\r{c(C.RED + C.BOLD, frame)} {c(C.RED + C.BOLD, self.label + dur)}\033[K"
                 sys.stdout.write(line)
                 sys.stdout.flush()
                 i += 1
