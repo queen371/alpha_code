@@ -84,7 +84,7 @@ Recommended defaults:
 ## Engines (API vs browser)
 
 - Auto-pick: `api` when `OPENAI_API_KEY` is set; otherwise `browser`.
-- Browser supports GPT + Gemini only; use `--engine api` for Claude/Grok/Codex or multi-model runs.
+- Browser supports GPT + Gemini only; use `--engine api` for other providers or multi-model runs.
 - Browser attachments:
   - `--browser-attachments auto|never|always` (auto pastes inline up to ~60k chars then uploads).
 - Remote browser host:

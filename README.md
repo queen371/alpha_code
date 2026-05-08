@@ -17,7 +17,7 @@ Pure async Python, minimal dependencies (`httpx`, `python-dotenv`, `ddgs`, `pyya
 ## Install
 
 ```bash
-git clone https://github.com/freire19/Alpha_Code.git
+git clone <your-repo-url>/Alpha_Code.git
 cd Alpha_Code
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .

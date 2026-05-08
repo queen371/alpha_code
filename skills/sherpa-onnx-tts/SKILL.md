@@ -63,30 +63,20 @@ Local TTS using the sherpa-onnx offline CLI.
 
 ## Install
 
-1. Download the runtime for your OS (extracts into `$OPENCLAW_STATE_DIR/tools/sherpa-onnx-tts/runtime`, default `~/.openclaw/tools/sherpa-onnx-tts/runtime`)
-2. Download a voice model (extracts into `$OPENCLAW_STATE_DIR/tools/sherpa-onnx-tts/models`, default `~/.openclaw/tools/sherpa-onnx-tts/models`)
+1. Download the runtime for your OS (extracts into `$STATE_DIR/tools/sherpa-onnx-tts/runtime`, default `~/.alpha/tools/sherpa-onnx-tts/runtime`)
+2. Download a voice model (extracts into `$STATE_DIR/tools/sherpa-onnx-tts/models`, default `~/.alpha/tools/sherpa-onnx-tts/models`)
 
-Resolve the active state directory first:
+Resolve the state directory first:
 
 ```bash
-STATE_DIR="${OPENCLAW_STATE_DIR:-$HOME/.openclaw}"
+STATE_DIR="${ALPHA_STATE_DIR:-$HOME/.alpha}"
 ```
 
-Then write those resolved paths into the active OpenClaw config file (`$OPENCLAW_CONFIG_PATH`, default `~/.openclaw/openclaw.json`):
+Then export the resolved paths as env vars (e.g. in `.env`):
 
-```json5
-{
-  skills: {
-    entries: {
-      "sherpa-onnx-tts": {
-        env: {
-          SHERPA_ONNX_RUNTIME_DIR: "/path/to/your/state-dir/tools/sherpa-onnx-tts/runtime",
-          SHERPA_ONNX_MODEL_DIR: "/path/to/your/state-dir/tools/sherpa-onnx-tts/models/vits-piper-en_US-lessac-high",
-        },
-      },
-    },
-  },
-}
+```bash
+SHERPA_ONNX_RUNTIME_DIR="$STATE_DIR/tools/sherpa-onnx-tts/runtime"
+SHERPA_ONNX_MODEL_DIR="$STATE_DIR/tools/sherpa-onnx-tts/models/vits-piper-en_US-lessac-high"
 ```
 
 The wrapper lives in this skill folder. Run it directly, or add the wrapper to PATH:

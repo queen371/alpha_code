@@ -1,21 +1,14 @@
 ---
 name: coding-agent
-description: 'Delegate coding tasks to Codex, Claude Code, or Pi agents via background process. Use when: (1) building/creating new features or apps, (2) reviewing PRs (spawn in temp dir), (3) refactoring large codebases, (4) iterative coding that needs file exploration. NOT for: simple one-liner fixes (just edit), reading code (use read tool), thread-bound ACP harness requests in chat (for example spawn/run Codex or Claude Code in a Discord thread; use sessions_spawn with runtime:"acp"), or any work in ~/clawd workspace (never spawn agents here). Claude Code: use --print --permission-mode bypassPermissions (no PTY). Codex/Pi/OpenCode: pty:true required.'
+description: 'Delegate coding tasks to Codex, Pi, or OpenCode agents via background process. Use when: (1) building/creating new features or apps, (2) reviewing PRs (spawn in temp dir), (3) refactoring large codebases, (4) iterative coding that needs file exploration. NOT for: simple one-liner fixes (just edit), reading code (use read tool), or any work in a state directory you do not want the agent to read. Codex/Pi/OpenCode all need pty:true.'
 metadata:
   {
     "alpha":
       {
         "emoji": "🧩",
-        "requires": { "anyBins": ["claude", "codex", "opencode", "pi"] },
+        "requires": { "anyBins": ["codex", "opencode", "pi"] },
         "install":
           [
-            {
-              "id": "node-claude",
-              "kind": "node",
-              "package": "@anthropic-ai/claude-code",
-              "bins": ["claude"],
-              "label": "Install Claude Code CLI (npm)",
-            },
             {
               "id": "node-codex",
               "kind": "node",
@@ -32,27 +25,13 @@ metadata:
 
 Use **bash** (with optional background mode) for all coding agent work. Simple and effective.
 
-## ⚠️ PTY Mode: Codex/Pi/OpenCode yes, Claude Code no
+## ⚠️ PTY Mode: required for Codex/Pi/OpenCode
 
-For **Codex, Pi, and OpenCode**, PTY is still required (interactive terminal apps):
+These agents are interactive terminal apps and need a pseudo-terminal:
 
 ```bash
-# ✅ Correct for Codex/Pi/OpenCode
+# ✅ Correct
 bash pty:true command:"codex exec 'Your prompt'"
-```
-
-For **Claude Code** (`claude` CLI), use `--print --permission-mode bypassPermissions` instead.
-`--dangerously-skip-permissions` with PTY can exit after the confirmation dialog.
-`--print` mode keeps full tool access and avoids interactive confirmation:
-
-```bash
-# ✅ Correct for Claude Code (no PTY needed)
-cd /path/to/project && claude --permission-mode bypassPermissions --print 'Your task'
-
-# For background execution: use background:true on the exec tool
-
-# ❌ Wrong for Claude Code
-bash pty:true command:"claude --dangerously-skip-permissions 'task'"
 ```
 
 ### Bash Tool Parameters
@@ -122,7 +101,7 @@ process action:submit sessionId:XXX data:"yes"
 process action:kill sessionId:XXX
 ```
 
-**Why workdir matters:** Agent wakes up in a focused directory, doesn't wander off reading unrelated files (like your soul.md 😅).
+**Why workdir matters:** Agent wakes up in a focused directory, doesn't wander off reading unrelated files.
 
 ---
 
@@ -150,7 +129,7 @@ bash pty:true workdir:~/project background:true command:"codex --yolo 'Refactor 
 
 ### Reviewing PRs
 
-**⚠️ CRITICAL: Never review PRs in OpenClaw's own project folder!**
+**⚠️ CRITICAL: Never review PRs in your main project folder!**
 Clone to temp folder or use git worktree.
 
 ```bash
@@ -185,18 +164,6 @@ gh pr comment <PR#> --body "<review content>"
 
 ---
 
-## Claude Code
-
-```bash
-# Foreground
-bash workdir:~/project command:"claude --permission-mode bypassPermissions --print 'Your task'"
-
-# Background
-bash workdir:~/project background:true command:"claude --permission-mode bypassPermissions --print 'Your task'"
-```
-
----
-
 ## OpenCode
 
 ```bash
@@ -217,8 +184,6 @@ bash pty:true command:"pi -p 'Summarize src/'"
 # Different provider/model
 bash pty:true command:"pi --provider openai --model gpt-4o-mini -p 'Your task'"
 ```
-
-**Note:** Pi now has Anthropic prompt caching enabled (PR #584, merged Jan 2026)!
 
 ---
 
@@ -252,19 +217,17 @@ git worktree remove /tmp/issue-99
 
 ## ⚠️ Rules
 
-1. **Use the right execution mode per agent**:
-   - Codex/Pi/OpenCode: `pty:true`
-   - Claude Code: `--print --permission-mode bypassPermissions` (no PTY required)
-2. **Respect tool choice** - if user asks for Codex, use Codex.
+1. **Codex/Pi/OpenCode require `pty:true`** — they are interactive terminal apps.
+2. **Respect tool choice** — if the user asks for a specific agent, use that one.
    - Orchestrator mode: do NOT hand-code patches yourself.
    - If an agent fails/hangs, respawn it or ask the user for direction, but don't silently take over.
-3. **Be patient** - don't kill sessions because they're "slow"
-4. **Monitor with process:log** - check progress without interfering
-5. **--full-auto for building** - auto-approves changes
-6. **vanilla for reviewing** - no special flags needed
-7. **Parallel is OK** - run many Codex processes at once for batch work
-8. **NEVER start Codex inside your OpenClaw state directory** (`$OPENCLAW_STATE_DIR`, default `~/.openclaw`) - it'll read your soul docs and get weird ideas about the org chart!
-9. **NEVER checkout branches in ~/Projects/openclaw/** - that's the LIVE OpenClaw instance!
+3. **Be patient** — don't kill sessions because they're "slow".
+4. **Monitor with `process:log`** — check progress without interfering.
+5. **`--full-auto` for building** — auto-approves changes.
+6. **Vanilla for reviewing** — no special flags needed.
+7. **Parallel is OK** — run many Codex processes at once for batch work.
+8. **NEVER start a coding agent inside a state directory you don't want it to read** — it'll pull in unrelated context.
+9. **NEVER checkout branches in your live work folder** — use a worktree or temp clone instead.
 
 ---
 
@@ -286,31 +249,13 @@ This prevents the user from seeing only "Agent failed before reply" and having n
 
 ## Auto-Notify on Completion
 
-For long-running background tasks, append a wake trigger to your prompt so OpenClaw gets notified immediately when the agent finishes (instead of waiting for the next heartbeat):
-
-```
-... your task here.
-
-When completely finished, run this command to notify me:
-openclaw system event --text "Done: [brief summary of what was built]" --mode now
-```
-
-**Example:**
-
-```bash
-bash pty:true workdir:~/project background:true command:"codex --yolo exec 'Build a REST API for todos.
-
-When completely finished, run: openclaw system event --text \"Done: Built todos REST API with CRUD endpoints\" --mode now'"
-```
-
-This triggers an immediate wake event — Skippy gets pinged in seconds, not 10 minutes.
+For long-running background tasks, append a notification step to your prompt so the agent itself signals completion (e.g., write a status file or call a webhook your runtime monitors).
 
 ---
 
-## Learnings (Jan 2026)
+## Learnings
 
 - **PTY is essential:** Coding agents are interactive terminal apps. Without `pty:true`, output breaks or agent hangs.
 - **Git repo required:** Codex won't run outside a git directory. Use `mktemp -d && git init` for scratch work.
-- **exec is your friend:** `codex exec "prompt"` runs and exits cleanly - perfect for one-shots.
-- **submit vs write:** Use `submit` to send input + Enter, `write` for raw data without newline.
-- **Sass works:** Codex responds well to playful prompts. Asked it to write a haiku about being second fiddle to a space lobster, got: _"Second chair, I code / Space lobster sets the tempo / Keys glow, I follow"_ 🦞
+- **`exec` is your friend:** `codex exec "prompt"` runs and exits cleanly — perfect for one-shots.
+- **`submit` vs `write`:** Use `submit` to send input + Enter, `write` for raw data without newline.

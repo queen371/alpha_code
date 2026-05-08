@@ -44,10 +44,9 @@ Use `imsg` to read and send iMessage/SMS via macOS Messages.app.
 - Signal messages → use Signal channel if configured
 - WhatsApp messages → use WhatsApp channel if configured
 - Discord messages → use `message` tool with `channel:discord`
-- Slack messages → use `slack` skill
 - Group chat management (adding/removing members) → not supported
 - Bulk/mass messaging → always confirm with user first
-- Replying in current conversation → just reply normally (OpenClaw routes automatically)
+- Replying in current conversation → just reply normally if your runtime routes the channel automatically
 
 ## Requirements
 

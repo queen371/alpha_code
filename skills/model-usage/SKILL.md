@@ -1,6 +1,6 @@
 ---
 name: model-usage
-description: Use CodexBar CLI local cost usage to summarize per-model usage for Codex or Claude, including the current (most recent) model or a full model breakdown. Trigger when asked for model-level usage/cost data from codexbar, or when you need a scriptable per-model summary from codexbar cost JSON.
+description: Use CodexBar CLI local cost usage to summarize per-model usage for the AI agent CLI tools that codexbar tracks, including the current (most recent) model or a full model breakdown. Trigger when asked for model-level usage/cost data from codexbar, or when you need a scriptable per-model summary from codexbar cost JSON.
 metadata:
   {
     "alpha":
@@ -26,7 +26,7 @@ metadata:
 
 ## Overview
 
-Get per-model usage cost from CodexBar's local cost logs. Supports "current model" (most recent daily entry) or "all models" summaries for Codex or Claude.
+Get per-model usage cost from CodexBar's local cost logs. Supports "current model" (most recent daily entry) or "all models" summaries for the providers codexbar tracks.
 
 TODO: add Linux CLI support guidance once CodexBar CLI install path is documented for Linux.
 
@@ -38,7 +38,7 @@ TODO: add Linux CLI support guidance once CodexBar CLI install path is documente
 ```bash
 python {baseDir}/scripts/model_usage.py --provider codex --mode current
 python {baseDir}/scripts/model_usage.py --provider codex --mode all
-python {baseDir}/scripts/model_usage.py --provider claude --mode all --format json --pretty
+python {baseDir}/scripts/model_usage.py --provider <provider-name> --mode all --format json --pretty
 ```
 
 ## Current model logic
@@ -50,7 +50,7 @@ python {baseDir}/scripts/model_usage.py --provider claude --mode all --format js
 
 ## Inputs
 
-- Default: runs `codexbar cost --format json --provider <codex|claude>`.
+- Default: runs `codexbar cost --format json --provider <provider-name>`.
 - File or stdin:
 
 ```bash
