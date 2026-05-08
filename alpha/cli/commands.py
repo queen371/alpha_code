@@ -452,6 +452,46 @@ def _handle_init(ctx: ReplContext, parts: list[str]) -> DispatchResult:
     return DispatchResult.FALL_THROUGH
 
 
+def _handle_context(ctx: ReplContext, parts: list[str]) -> DispatchResult:
+    """Show current context window usage."""
+    from alpha.context import (
+        COMPRESSION_THRESHOLD,
+        MAX_MESSAGES,
+        estimate_messages_tokens,
+        get_context_limit,
+    )
+
+    used = estimate_messages_tokens(ctx.messages)
+    limit = get_context_limit(ctx.provider)
+    pct = (used / limit * 100) if limit else 0.0
+    trigger_at = int(limit * COMPRESSION_THRESHOLD)
+
+    if pct >= 90:
+        bar_color = C.RED + C.BOLD
+    elif pct >= 70:
+        bar_color = C.YELLOW + C.BOLD
+    elif pct >= 50:
+        bar_color = C.YELLOW
+    else:
+        bar_color = C.GREEN
+
+    bar_len = 30
+    filled = min(bar_len, int(pct / 100 * bar_len))
+    if pct > 0 and filled == 0:
+        filled = 1
+    bar = c(bar_color, "█" * filled) + c(C.GRAY_DARK, "░" * (bar_len - filled))
+
+    print(f"  {c(C.CYAN, 'Provider:')}    {ctx.provider} ({ctx.cfg.get('model', '?')})")
+    print(f"  {c(C.CYAN, 'Tokens:')}      {used:,} / {limit:,} ({pct:.1f}%)")
+    print(f"  {c(C.CYAN, 'Usage:')}       {bar}")
+    print(f"  {c(C.CYAN, 'Messages:')}    {len(ctx.messages)} / {MAX_MESSAGES}")
+    print(
+        f"  {c(C.CYAN, 'Compresses:')}  at {int(COMPRESSION_THRESHOLD * 100)}% "
+        f"({trigger_at:,} tokens) or {MAX_MESSAGES} messages"
+    )
+    return DispatchResult.CONTINUE
+
+
 def _handle_help(ctx: ReplContext, parts: list[str]) -> DispatchResult:
     print(f"  {c(C.CYAN, '/init')}     — Draft an ALPHA.md for this project")
     print(f"  {c(C.CYAN, '/clear')}    — Clear history and screen")
@@ -460,6 +500,7 @@ def _handle_help(ctx: ReplContext, parts: list[str]) -> DispatchResult:
     print(f"  {c(C.CYAN, '/load')}     — Load a previous session")
     print(f"  {c(C.CYAN, '/continue')} — Resume from last session")
     print(f"  {c(C.CYAN, '/sessions')} — List saved sessions")
+    print(f"  {c(C.CYAN, '/context')}  — Show context window usage")
     print(f"  {c(C.CYAN, '/tools')}    — List available tools")
     print(f"  {c(C.CYAN, '/skills')}   — List registered skills (ready vs inactive)")
     print(f"  {c(C.CYAN, '/mcp')}      — List connected MCP servers")
@@ -492,6 +533,7 @@ _DISPATCH: dict[str, Callable[[ReplContext, list[str]], DispatchResult]] = {
     "/agent": _handle_agent,
     "/model": _handle_model,
     "/init": _handle_init,
+    "/context": _handle_context,
     "/help": _handle_help,
 }
 

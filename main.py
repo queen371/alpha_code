@@ -30,9 +30,11 @@ from alpha.display import (
     C,
     ThinkingIndicator,
     c,
+    format_context_indicator,
     label_for_tool,
     print_banner,
     print_context_compressed,
+    print_context_warning,
     print_error,
     print_phase,
     print_providers_list,
@@ -84,6 +86,12 @@ async def _run_once(messages, user_message, provider, temperature, get_tool_fn, 
 
             elif event_type == "tool_call":
                 indicator.stop()
+                # Break out of any in-flight content line so the tool call
+                # renders cleanly below, instead of glued to the prose.
+                if full_reply and not full_reply.endswith("\n"):
+                    sys.stdout.write("\n")
+                    sys.stdout.flush()
+                    full_reply += "\n"
                 tc_args = event.get("args", {}) or {}
                 print_tool_call(event["name"], tc_args, event.get("safety", "safe"))
                 pending_args[event["name"]] = tc_args if isinstance(tc_args, dict) else {}
@@ -140,6 +148,7 @@ def run_repl(provider: str, temperature: float):
     messages = [{"role": "system", "content": system_prompt}]
     history = []
     session_id = generate_session_id()
+    announced_thresholds: set[int] = set()
 
     get_tool_fn, tools = _get_tools_for_agent(active_agent)
 
@@ -178,7 +187,17 @@ def run_repl(provider: str, temperature: float):
 
     while True:
         try:
-            prompt = f"{c(C.GREEN + C.BOLD, '❯')} "
+            from alpha.context import estimate_messages_tokens, get_context_limit
+            _used = estimate_messages_tokens(messages)
+            _limit = get_context_limit(provider)
+            _pct = int((_used / _limit * 100)) if _limit else 0
+            for _t in (50, 70, 90):
+                if _pct >= _t and _t not in announced_thresholds:
+                    print_context_warning(_pct, _used, _limit)
+                    announced_thresholds.add(_t)
+                    break
+            ctx_chip = format_context_indicator(messages, provider)
+            prompt = f"{ctx_chip}{c(C.GREEN + C.BOLD, '❯')} "
             user_input, image_paths = read_input(prompt)
             user_input = user_input.strip()
         except (KeyboardInterrupt, EOFError):

@@ -395,6 +395,59 @@ def print_context_compressed(before: int, after: int) -> None:
     )
 
 
+def _context_pct(messages: list[dict], provider: str) -> tuple[int, int, float]:
+    """Return (used_tokens, limit_tokens, pct_used)."""
+    from .context import estimate_messages_tokens, get_context_limit
+
+    used = estimate_messages_tokens(messages)
+    limit = get_context_limit(provider)
+    pct = (used / limit * 100) if limit else 0.0
+    return used, limit, pct
+
+
+def format_context_indicator(messages: list[dict], provider: str) -> str:
+    """Compact `[ctx N%]` chip for the REPL prompt. Color shifts with %.
+
+    Returns an empty string when usage is below 1% — keeps the prompt
+    clean during light sessions.
+    """
+    _, _, pct = _context_pct(messages, provider)
+    if pct < 1:
+        return ""
+    if pct >= 90:
+        color = C.RED + C.BOLD
+    elif pct >= 70:
+        color = C.YELLOW + C.BOLD
+    elif pct >= 50:
+        color = C.YELLOW
+    else:
+        color = C.GRAY
+    return c(color, f"[ctx {int(pct)}%] ")
+
+
+def print_context_warning(pct: int, used: int, limit: int) -> None:
+    """One-line warning when crossing a context-usage threshold.
+
+    Called at most once per threshold per session (50/70/90). Compression
+    fires automatically at 70%, so 70% acts as `imminent` and 90% as
+    `compressing every turn`.
+    """
+    if pct >= 90:
+        color, icon, label = C.RED + C.BOLD, "⚠", "CRITICAL"
+        note = "compactacao acontecendo a cada turno"
+    elif pct >= 70:
+        color, icon, label = C.YELLOW + C.BOLD, "⚠", "HIGH"
+        note = "compactacao iminente (threshold 70%)"
+    else:
+        color, icon, label = C.YELLOW, "ⓘ", "INFO"
+        note = "metade do contexto consumida"
+    print(
+        f"  {c(color, icon)} {c(color, label)} "
+        f"{c(C.GRAY, f'context: {used:,}/{limit:,} tokens ({pct}%)')} "
+        f"{c(C.DIM, '— ' + note)}"
+    )
+
+
 def print_subagent_event(event: dict, agent_label: str = "") -> None:
     """Display a sub-agent event with indentation."""
     prefix = f"  {c(C.GRAY_DARK, '┊')}"
@@ -563,24 +616,36 @@ def label_for_tool(name: str) -> str:
     n = name.lower()
     if n.startswith("mcp__"):
         return "Calling MCP"
-    if n in {"read_file", "view_file", "read"}:
+    if n in {"read_file", "list_directory", "list_tables"}:
         return "Reading"
-    if n in {"glob_files", "search_files", "grep_files", "find_files", "grep"}:
+    if n in {"glob_files", "search_files", "project_overview"}:
         return "Searching"
-    if n in {"edit_file", "write_file", "multi_edit", "search_and_replace"}:
+    if n in {"edit_file", "write_file", "search_and_replace"}:
         return "Editing"
-    if n in {"run_shell", "run_command", "shell", "bash"}:
-        return "Running"
+    if n in {"execute_shell", "execute_pipeline", "execute_python"}:
+        return "Bash"
+    if n in {"http_request", "web_search", "apify_run_actor", "apify_search_actors"}:
+        return "Fetching"
     if n in {"delegate_task", "delegate_parallel"}:
         return "Delegating"
     if n in {"present_plan", "todo_write"}:
         return "Planning"
-    if n in {"web_fetch", "web_search", "http_request", "fetch"}:
-        return "Fetching"
-    if n in {"run_tests", "deploy_check"}:
-        return "Testing"
     if n in {"query_database", "describe_table"}:
         return "Querying"
+    if n in {"run_tests", "deploy_check"}:
+        return "Testing"
+    if n == "git_operation":
+        return "Git"
+    if n == "screenshot":
+        return "Capturing"
+    if n == "install_package":
+        return "Installing"
+    if n == "load_skill":
+        return "Loading skill"
+    if n == "notify_user":
+        return "Notifying"
+    if n in {"clipboard_read", "clipboard_write"}:
+        return "Clipboard"
     return "Working"
 
 
