@@ -373,7 +373,7 @@ async def _query_database(
         fetch_timeout = TOOL_TIMEOUTS.get("database", 30)
         try:
             pool = await asyncio.wait_for(_get_pg_pool(connection), timeout=10)
-            async with pool.acquire() as conn:
+            async with pool.acquire(timeout=fetch_timeout) as conn:
                 if _is_write_query(query):
                     if read_only:
                         return {"error": "Query de escrita bloqueada em modo read_only"}
@@ -450,7 +450,7 @@ async def _describe_table(connection: str, table: str, db_type: str = "sqlite") 
         fetch_timeout = TOOL_TIMEOUTS.get("database", 30)
         try:
             pool = await asyncio.wait_for(_get_pg_pool(connection), timeout=10)
-            async with pool.acquire() as conn:
+            async with pool.acquire(timeout=fetch_timeout) as conn:
                 rows = await asyncio.wait_for(
                     conn.fetch(
                         "SELECT column_name, data_type, is_nullable, column_default "

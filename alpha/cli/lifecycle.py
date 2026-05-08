@@ -18,6 +18,7 @@ import os
 import sys
 
 from alpha import hooks
+from alpha.display import cleanup_indicator
 from alpha.mcp import shutdown_mcp_servers
 from alpha.repl_input import cleanup_temp_images
 
@@ -114,5 +115,9 @@ def install_lifecycle_hooks() -> None:
     atexit.register(_shutdown_browser_session)
     atexit.register(_shutdown_mcp_servers)
     atexit.register(cleanup_temp_images)
+    # atexit runs hooks in reverse-registration order, so registering
+    # cleanup_indicator last means it fires first — restoring the
+    # scroll region before any other hook writes to stdout/stderr.
+    atexit.register(cleanup_indicator)
     _install_sigterm_handler()
     _INSTALLED = True

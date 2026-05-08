@@ -62,8 +62,15 @@ async def _clipboard_read() -> dict:
             "length": len(content),
             "truncated": len(content) > 10000,
         }
-    except TimeoutError:
+    except asyncio.TimeoutError:
         return {"error": "Timeout ao ler clipboard"}
+    except asyncio.CancelledError:
+        proc.kill()
+        try:
+            await proc.wait()
+        except Exception:
+            pass
+        raise
     except Exception as e:
         return {"error": str(e)}
 
@@ -94,8 +101,15 @@ async def _clipboard_write(content: str) -> dict:
             return {"error": f"Falha ao escrever no clipboard: {stderr.decode(errors='replace')}"}
 
         return {"success": True, "length": len(content)}
-    except TimeoutError:
+    except asyncio.TimeoutError:
         return {"error": "Timeout ao escrever no clipboard"}
+    except asyncio.CancelledError:
+        proc.kill()
+        try:
+            await proc.wait()
+        except Exception:
+            pass
+        raise
     except Exception as e:
         return {"error": str(e)}
 
@@ -188,6 +202,13 @@ async def _screenshot(region: str = "full") -> dict:
                     "region": region,
                     "tool_used": tool_name,
                 }
+        except asyncio.CancelledError:
+            proc.kill()
+            try:
+                await proc.wait()
+            except Exception:
+                pass
+            raise
         except (OSError, subprocess.CalledProcessError) as e:
             logger.debug("Screenshot tool %s failed: %s", tool_name, e)
             continue
@@ -233,6 +254,13 @@ async def _notify_user(
                 return {"error": f"Falha ao enviar notificação: {stderr.decode(errors='replace')}"}
 
             return {"sent": True, "channel": "desktop", "urgency": urgency}
+        except asyncio.CancelledError:
+            proc.kill()
+            try:
+                await proc.wait()
+            except Exception:
+                pass
+            raise
         except Exception as e:
             return {"error": str(e)}
 

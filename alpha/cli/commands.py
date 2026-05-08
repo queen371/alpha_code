@@ -52,10 +52,12 @@ from alpha.display import (
     C,
     c,
     print_banner,
+    is_auto_accept,
     print_error,
     print_sessions_list,
     print_tools_list,
     reset_approve_all,
+    set_auto_accept,
 )
 from alpha.history import (
     generate_session_id,
@@ -492,6 +494,41 @@ def _handle_context(ctx: ReplContext, parts: list[str]) -> DispatchResult:
     return DispatchResult.CONTINUE
 
 
+def _handle_accept_edits(ctx: ReplContext, parts: list[str]) -> DispatchResult:
+    """Toggle auto-approve mode for destructive tools (or set explicitly).
+
+    Usage:
+        /accept-edits          # toggle
+        /accept-edits on       # force on
+        /accept-edits off      # force off
+    """
+    if len(parts) > 1:
+        arg = parts[1].lower()
+        if arg in ("on", "true", "1", "yes", "y"):
+            set_auto_accept(True)
+        elif arg in ("off", "false", "0", "no", "n"):
+            set_auto_accept(False)
+        else:
+            print(f"  {c(C.YELLOW, 'Usage:')} /accept-edits [on|off]")
+            return DispatchResult.CONTINUE
+    else:
+        set_auto_accept(not is_auto_accept())
+
+    if is_auto_accept():
+        print(
+            f"  {c(C.GREEN + C.BOLD, '»»')} "
+            f"{c(C.GREEN, 'accept edits ON')} "
+            f"{c(C.GRAY, '— destructive tools auto-approved this session')}"
+        )
+    else:
+        print(
+            f"  {c(C.GRAY, '»»')} "
+            f"{c(C.YELLOW, 'accept edits OFF')} "
+            f"{c(C.GRAY, '— destructive tools will prompt')}"
+        )
+    return DispatchResult.CONTINUE
+
+
 def _handle_help(ctx: ReplContext, parts: list[str]) -> DispatchResult:
     print(f"  {c(C.CYAN, '/init')}     — Draft an ALPHA.md for this project")
     print(f"  {c(C.CYAN, '/clear')}    — Clear history and screen")
@@ -501,6 +538,7 @@ def _handle_help(ctx: ReplContext, parts: list[str]) -> DispatchResult:
     print(f"  {c(C.CYAN, '/continue')} — Resume from last session")
     print(f"  {c(C.CYAN, '/sessions')} — List saved sessions")
     print(f"  {c(C.CYAN, '/context')}  — Show context window usage")
+    print(f"  {c(C.CYAN, '/accept-edits')} — Toggle auto-approve for destructive tools (shift+tab)")
     print(f"  {c(C.CYAN, '/tools')}    — List available tools")
     print(f"  {c(C.CYAN, '/skills')}   — List registered skills (ready vs inactive)")
     print(f"  {c(C.CYAN, '/mcp')}      — List connected MCP servers")
@@ -534,6 +572,8 @@ _DISPATCH: dict[str, Callable[[ReplContext, list[str]], DispatchResult]] = {
     "/model": _handle_model,
     "/init": _handle_init,
     "/context": _handle_context,
+    "/accept-edits": _handle_accept_edits,
+    "/accept_edits": _handle_accept_edits,
     "/help": _handle_help,
 }
 

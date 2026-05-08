@@ -305,7 +305,7 @@ def load_session(session_id: str) -> list[dict] | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         return data.get("messages", [])
-    except (json.JSONDecodeError, KeyError) as e:
+    except (json.JSONDecodeError, KeyError, UnicodeDecodeError, OSError) as e:
         logger.warning(f"Failed to load session {session_id}: {e}")
         return None
 

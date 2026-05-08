@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import shlex
+import tempfile
 from pathlib import Path
 
 # #D009: imports promovidos pra topo. Antes viviam inline em `_run_tool`,
@@ -27,7 +28,8 @@ from ..executor import (
 )
 from . import ToolDefinition, ToolSafety, get_tool, register_tool
 from .file_tools import _validate_path_no_symlink
-from .workspace import AGENT_WORKSPACE, assert_within_workspace
+from .path_helpers import _validate_path
+from .workspace import AGENT_WORKSPACE
 
 logger = logging.getLogger(__name__)
 
@@ -87,11 +89,10 @@ async def _run_tool(name: str, *, timeout: float | None = None, **kwargs) -> dic
 async def _project_overview(path: str = None) -> dict:
     """Get a comprehensive overview of a project directory."""
     target = path or str(AGENT_WORKSPACE)
-    target_path = Path(target).expanduser().resolve()
-
-    err = assert_within_workspace(target_path)
-    if err:
-        return _violation(err)
+    try:
+        target_path = _validate_path(target)
+    except PermissionError as e:
+        return _violation(str(e))
 
     results = {}
 
@@ -156,11 +157,10 @@ async def _run_tests(
 ) -> dict:
     """Detect test framework and run tests."""
     target = path or str(AGENT_WORKSPACE)
-    target_path = Path(target).expanduser().resolve()
-
-    err = assert_within_workspace(target_path)
-    if err:
-        return _violation(err)
+    try:
+        target_path = _validate_path(target)
+    except PermissionError as e:
+        return _violation(str(e))
 
     # Auto-detect framework
     if framework == "auto":
@@ -226,12 +226,7 @@ async def _search_and_replace(
     dry_run: bool = True,
 ) -> dict:
     """Search and replace across multiple files."""
-    target_path = Path(path).expanduser().resolve()
-
-    try:
-        target_path.relative_to(AGENT_WORKSPACE)
-    except ValueError:
-        return _violation(f"Path fora do workspace permitido ({AGENT_WORKSPACE})")
+    target_path = _validate_path(path)
 
     # Find files with matches
     search_result = await _run_tool("search_files", path=str(target_path), pattern=re.escape(search))
@@ -289,19 +284,30 @@ async def _search_and_replace(
         if count == 0:
             continue
         updated = original.replace(search, replace)
-        # Single write — same atomic open pattern de edit_file
+        # Atomic write via tempfile + os.replace — writing in-place with
+        # O_TRUNC corrupts the file if the process crashes mid-write.
+        tmp_path: str | None = None
         try:
-            flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-            if hasattr(os, "O_NOFOLLOW"):
-                flags |= os.O_NOFOLLOW
-            fd = os.open(str(p), flags, 0o644)
+            fd, tmp_path = tempfile.mkstemp(prefix=".sr_", dir=str(p.parent))
             try:
+                os.fchmod(fd, 0o644)
                 os.write(fd, updated.encode("utf-8"))
             finally:
                 os.close(fd)
+            os.replace(tmp_path, p)
+            tmp_path = None
         except OSError as e:
             errors.append({"file": filepath, "error": str(e)})
             continue
+        except BaseException:
+            # KeyboardInterrupt and other non-Exception throws also need to
+            # clean up the orphan tempfile before propagating.
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+            raise
         changed_files.append({"file": filepath, "replacements": count})
 
     return {
@@ -318,12 +324,10 @@ async def _search_and_replace(
 async def _deploy_check(path: str = None) -> dict:
     """Run pre-deployment checklist: tests, git status, lint."""
     target = path or str(AGENT_WORKSPACE)
-    target_path = Path(target).expanduser().resolve()
-
     try:
-        target_path.relative_to(AGENT_WORKSPACE)
-    except ValueError:
-        return _violation(f"Path fora do workspace permitido ({AGENT_WORKSPACE})")
+        target_path = _validate_path(target)
+    except PermissionError as e:
+        return _violation(str(e))
 
     checks = {}
 

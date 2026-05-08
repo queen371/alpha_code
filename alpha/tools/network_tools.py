@@ -164,52 +164,60 @@ async def _http_request(
             req_kwargs["server_hostname"] = hostname
         resp = await session.request(**req_kwargs)
 
-        # Manual redirect following com re-validação DNS+IP
-        redirect_count = 0
-        while resp.status in (301, 302, 303, 307, 308) and redirect_count < 5:
-            redirect_url = resp.headers.get("Location")
-            if not redirect_url:
-                break
+        try:
+            # Manual redirect following com re-validação DNS+IP
+            redirect_count = 0
+            while resp.status in (301, 302, 303, 307, 308) and redirect_count < 5:
+                redirect_url = resp.headers.get("Location")
+                if not redirect_url:
+                    break
 
-            # Resolver URL relativo
-            if redirect_url.startswith("/"):
-                port = parsed.port
-                port_str = f":{port}" if port else ""
-                redirect_url = f"{parsed.scheme}://{hostname}{port_str}{redirect_url}"
+                # Resolver URL relativo
+                if redirect_url.startswith("/"):
+                    port = parsed.port
+                    port_str = f":{port}" if port else ""
+                    redirect_url = f"{parsed.scheme}://{hostname}{port_str}{redirect_url}"
 
-            # Re-validar DNS + IP do destino do redirect
-            redirect_parsed = urlparse(redirect_url)
-            redirect_hostname = redirect_parsed.hostname
-            if not redirect_hostname:
-                break
+                # Re-validar DNS + IP do destino do redirect
+                redirect_parsed = urlparse(redirect_url)
+                redirect_hostname = redirect_parsed.hostname
+                if not redirect_hostname:
+                    break
 
-            try:
-                redirect_ip = await _resolve_and_validate(redirect_hostname)
-            except ValueError as e:
-                return {"error": f"Redirect bloqueado: {e}", "blocked": True}
+                try:
+                    redirect_ip = await _resolve_and_validate(redirect_hostname)
+                except ValueError as e:
+                    return {"error": f"Redirect bloqueado: {e}", "blocked": True}
 
-            fixed_redirect = _rewrite_url_with_ip(redirect_parsed, redirect_ip)
-            req_headers["Host"] = redirect_hostname
+                fixed_redirect = _rewrite_url_with_ip(redirect_parsed, redirect_ip)
+                req_headers["Host"] = redirect_hostname
 
-            redirect_is_https = redirect_parsed.scheme == "https"
-            redirect_ssl = (
-                _ssl.create_default_context() if redirect_is_https else False
-            )
-            redirect_kwargs = dict(
-                method=method,
-                url=fixed_redirect,
-                headers=req_headers,
-                allow_redirects=False,
-                timeout=aiohttp.ClientTimeout(total=timeout),
-                ssl=redirect_ssl,
-            )
-            if redirect_is_https:
-                redirect_kwargs["server_hostname"] = redirect_hostname
-            resp = await session.request(**redirect_kwargs)
-            redirect_count += 1
+                redirect_is_https = redirect_parsed.scheme == "https"
+                redirect_ssl = (
+                    _ssl.create_default_context() if redirect_is_https else False
+                )
+                redirect_kwargs = dict(
+                    method=method,
+                    url=fixed_redirect,
+                    headers=req_headers,
+                    allow_redirects=False,
+                    timeout=aiohttp.ClientTimeout(total=timeout),
+                    ssl=redirect_ssl,
+                )
+                if redirect_is_https:
+                    redirect_kwargs["server_hostname"] = redirect_hostname
+                # Release the previous response before starting the next one
+                # so its connection returns to the pool immediately.
+                old_resp = resp
+                resp = await session.request(**redirect_kwargs)
+                old_resp.release()
+                redirect_count += 1
 
-        # Read response with size limit
-        raw = await resp.read()
+            # Read response with size limit
+            raw = await resp.read()
+        finally:
+            # Release also covers the `read()` raising mid-stream.
+            resp.release()
         if len(raw) > _MAX_RESPONSE_SIZE:
             body_text = raw[:_MAX_RESPONSE_SIZE].decode(errors="replace")
             body_text += f"\n... [truncado: resposta > {_MAX_RESPONSE_SIZE // 1000}KB]"

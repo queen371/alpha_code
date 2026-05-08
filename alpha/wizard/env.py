@@ -84,8 +84,10 @@ def write_env(updates: dict[str, str]) -> Path:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(content)
         os.replace(tmp_path, ENV_PATH)
-    except Exception:
-        # Cleanup do tmp em caso de erro antes do replace
+    except BaseException:
+        # KeyboardInterrupt and other non-Exception throws also need to
+        # clean up the orphan tmp file before propagating; without this
+        # the tempfile leaks if `os.replace` never ran.
         try:
             os.unlink(tmp_path)
         except OSError:

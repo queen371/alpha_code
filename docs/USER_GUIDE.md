@@ -12,11 +12,50 @@ Requires Python 3.11+.
 ```bash
 git clone <your repo>
 cd Alpha_Code
-python -m venv .venv
-source .venv/bin/activate
+```
+
+Then pick the section for your OS.
+
+### Linux / WSL
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 cp .env.example .env
 ```
+
+Image clipboard paste needs `xclip` (X11) or `wl-clipboard` (Wayland):
+
+```bash
+sudo apt install xclip          # X11
+sudo apt install wl-clipboard   # Wayland
+```
+
+### macOS
+
+```bash
+brew install python@3.11        # if needed
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
+cp .env.example .env
+```
+
+Image clipboard paste works out of the box (`pbpaste` is built in).
+
+### Windows (PowerShell)
+
+```powershell
+py -3.11 -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -e .
+copy .env.example .env
+```
+
+If `Activate.ps1` is blocked: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` (one time only).
+
+For image clipboard paste, use WSL2 + `xclip` — native PowerShell handles text input, but the image-grab path in `alpha/clipboard.py` targets Linux/macOS clipboard tools.
+
+---
 
 Open `.env` and fill the API keys for the providers you want to use:
 
@@ -38,6 +77,8 @@ The default provider is **deepseek**. Override with `ALPHA_PROVIDER=openai` in
 ```
 
 The wrapper auto-activates `.venv` so you can call Alpha from anywhere.
+On Windows, run `python main.py` directly — `./bin/alpha` is a POSIX shell
+script and won't run in PowerShell/CMD without WSL.
 
 ---
 

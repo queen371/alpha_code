@@ -288,6 +288,13 @@ async def _install_package(package: str) -> dict:
         proc.kill()
         await proc.wait()
         return {"error": "Instalação excedeu timeout de 120s"}
+    except asyncio.CancelledError:
+        proc.kill()
+        try:
+            await proc.wait()
+        except Exception:
+            pass
+        raise
 
     return {
         "exit_code": proc.returncode,

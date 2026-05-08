@@ -15,16 +15,66 @@ the rest of the loop already consumes.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncGenerator
 
 import httpx
 
+from .llm import _calc_backoff
+
 logger = logging.getLogger(__name__)
 
 ANTHROPIC_VERSION = "2023-06-01"
 DEFAULT_MAX_TOKENS = 8192
+_ANTHROPIC_RETRY_MAX = 3
+_TRANSIENT_HTTPX_ERRORS = (
+    httpx.ConnectError,
+    httpx.RemoteProtocolError,
+    httpx.ReadTimeout,
+    httpx.ConnectTimeout,
+    httpx.PoolTimeout,
+)
+
+# Loop-aware shared client; mirrors llm.py. Single-shot CLI (`asyncio.run`)
+# creates a new loop per invocation but the module stays import-cached, so we
+# rebuild when the loop or client is stale.
+_client: httpx.AsyncClient | None = None
+_client_loop: object | None = None
+_client_lock = asyncio.Lock()
+
+
+async def _get_client(timeout: float) -> httpx.AsyncClient:
+    """Return a loop-aware shared httpx.AsyncClient for Anthropic."""
+    global _client, _client_loop
+    loop = asyncio.get_running_loop()
+    if (
+        _client is not None
+        and not _client.is_closed
+        and _client_loop is loop
+    ):
+        return _client
+    # Lock protects the aclose() + reassign window from concurrent coroutines
+    # creating duplicate clients (mirrors the same guard in llm.py).
+    async with _client_lock:
+        if (
+            _client is not None
+            and not _client.is_closed
+            and _client_loop is loop
+        ):
+            return _client
+        if _client is not None and not _client.is_closed:
+            try:
+                await _client.aclose()
+            except Exception:
+                pass
+        _client = httpx.AsyncClient(
+            timeout=httpx.Timeout(timeout, connect=10.0),
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=20),
+        )
+        _client_loop = loop
+    return _client
 
 
 # ── OpenAI → Anthropic conversion ──
@@ -195,63 +245,102 @@ async def stream_anthropic(
 
     accumulated_content = ""
     blocks: dict[int, dict] = {}  # index → {"type": "text"|"tool_use", ...}
+    yielded_any = False
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=10.0)) as client:
-        async with client.stream(
-            "POST", f"{base_url}/messages", json=payload, headers=headers
-        ) as response:
-            if response.status_code >= 400:
-                body = await response.aread()
-                logger.error(f"Anthropic HTTP {response.status_code}: {body[:500]}")
-                yield {
-                    "type": "final",
-                    "content": "",
-                    "tool_calls": [],
-                    "error": f"HTTP {response.status_code}: {body[:200].decode('utf-8', errors='replace')}",
-                }
-                return
+    client = await _get_client(timeout)
+    last_error: str | None = None
 
-            async for line in response.aiter_lines():
-                if not line.startswith("data: "):
-                    continue
-                data_str = line[6:]
-                try:
-                    event = json.loads(data_str)
-                except json.JSONDecodeError:
-                    continue
+    for attempt in range(_ANTHROPIC_RETRY_MAX + 1):
+        try:
+            async with client.stream(
+                "POST", f"{base_url}/messages", json=payload, headers=headers
+            ) as response:
+                if response.status_code >= 400:
+                    body = await response.aread()
+                    logger.error(f"Anthropic HTTP {response.status_code}: {body[:500]}")
+                    yield {
+                        "type": "final",
+                        "content": "",
+                        "tool_calls": [],
+                        "error": f"HTTP {response.status_code}: {body[:200].decode('utf-8', errors='replace')}",
+                    }
+                    return
 
-                etype = event.get("type")
-
-                if etype == "content_block_start":
-                    idx = event["index"]
-                    block = event["content_block"]
-                    if block["type"] == "text":
-                        blocks[idx] = {"type": "text", "text": ""}
-                    elif block["type"] == "tool_use":
-                        blocks[idx] = {
-                            "type": "tool_use",
-                            "id": block.get("id", ""),
-                            "name": block.get("name", ""),
-                            "input_json": "",
-                        }
-
-                elif etype == "content_block_delta":
-                    idx = event["index"]
-                    delta = event.get("delta", {})
-                    block = blocks.get(idx)
-                    if block is None:
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
                         continue
-                    if delta.get("type") == "text_delta":
-                        text = delta.get("text", "")
-                        if text:
-                            block["text"] = block.get("text", "") + text
-                            accumulated_content += text
-                            yield {"type": "content_token", "token": text}
-                    elif delta.get("type") == "input_json_delta":
-                        block["input_json"] = block.get("input_json", "") + delta.get("partial_json", "")
+                    data_str = line[6:]
+                    try:
+                        event = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
 
-                elif etype == "message_stop":
-                    break
+                    etype = event.get("type")
+
+                    if etype == "content_block_start":
+                        idx = event["index"]
+                        block = event["content_block"]
+                        if block["type"] == "text":
+                            blocks[idx] = {"type": "text", "text": ""}
+                        elif block["type"] == "tool_use":
+                            blocks[idx] = {
+                                "type": "tool_use",
+                                "id": block.get("id", ""),
+                                "name": block.get("name", ""),
+                                "input_json": "",
+                            }
+
+                    elif etype == "content_block_delta":
+                        idx = event["index"]
+                        delta = event.get("delta", {})
+                        block = blocks.get(idx)
+                        if block is None:
+                            continue
+                        if delta.get("type") == "text_delta":
+                            text = delta.get("text", "")
+                            if text:
+                                block["text"] = block.get("text", "") + text
+                                accumulated_content += text
+                                yielded_any = True
+                                yield {"type": "content_token", "token": text}
+                        elif delta.get("type") == "input_json_delta":
+                            block["input_json"] = block.get("input_json", "") + delta.get("partial_json", "")
+
+                    elif etype == "message_stop":
+                        break
+
+            # Success — break out of retry loop
+            last_error = None
+            break
+
+        except _TRANSIENT_HTTPX_ERRORS as e:
+            last_error = f"{type(e).__name__}: {e}"
+            # Once any token has been yielded to the caller the partial stream
+            # is already committed downstream — replaying would duplicate it.
+            if yielded_any or attempt >= _ANTHROPIC_RETRY_MAX:
+                break
+            backoff = _calc_backoff(attempt)
+            logger.warning(
+                f"Anthropic transient error (attempt {attempt + 1}/{_ANTHROPIC_RETRY_MAX + 1}), "
+                f"retrying in {backoff:.1f}s: {e}"
+            )
+            blocks = {}
+            await asyncio.sleep(backoff)
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            raise
+        except Exception as e:
+            last_error = f"{type(e).__name__}: {e}"
+            logger.error(f"Anthropic non-transient error: {e}", exc_info=True)
+            break
+
+    if last_error:
+        yield {
+            "type": "final",
+            "content": "",
+            "tool_calls": [],
+            "error": last_error,
+        }
+        return
 
     tool_calls = []
     for _, block in sorted(blocks.items()):

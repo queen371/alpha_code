@@ -271,22 +271,27 @@ async def _run_subagent(
                     print_subagent_event(event, label)
             elif event["type"] == "error":
                 errors.append(event.get("message", "unknown error"))
+    except asyncio.CancelledError:
+        raise
     except Exception as e:
         # #056: log full traceback (logger.error sem exc_info perdia o
-        # frame onde o bug realmente aconteceu). #061: limpar scratch dir
-        # se ficou vazio para nao acumular diretorios orfaos por falha.
+        # frame onde o bug realmente aconteceu).
         logger.error(f"Sub-agent {agent_id} failed: {e}", exc_info=True)
-        try:
-            if scratch_dir.exists() and not any(scratch_dir.iterdir()):
-                scratch_dir.rmdir()
-        except OSError:
-            pass
         return {
             "ok": False,
             "category": "subagent_error",
             "error": f"Sub-agent execution failed: {type(e).__name__}: {e}",
             "agent_id": agent_id,
         }
+    finally:
+        # Cleanup runs on every exit path (Exception, CancelledError,
+        # KeyboardInterrupt). Empty-dir guard: never remove a scratch dir
+        # the sub-agent may have written artifacts into.
+        try:
+            if scratch_dir.exists() and not any(scratch_dir.iterdir()):
+                scratch_dir.rmdir()
+        except OSError:
+            pass
 
     scratch_files = await asyncio.to_thread(_snapshot_dir, scratch_dir)
 

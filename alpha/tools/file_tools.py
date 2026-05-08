@@ -27,6 +27,11 @@ _RIPGREP_BIN = shutil.which("rg")
 # Excluir os mesmos paths que o fallback Python pula
 _RG_EXCLUDES = (".git", "node_modules", "__pycache__", ".venv")
 
+# Inline edits load the whole file into memory; refuse anything larger so we
+# don't allocate runaway buffers (the previous unconditional 10MB read also
+# silently truncated bigger files).
+_EDIT_MAX_BYTES = 10_000_000
+
 
 # ─── Safe Tools ───
 
@@ -288,6 +293,13 @@ async def _search_with_ripgrep(pattern: str, root: Path, max_results: int) -> li
         # a versao chamadora vai re-compilar. Devolver vazio aqui evita
         # double-work; o usuario pode re-tentar com pattern mais especifico.
         return []
+    except asyncio.CancelledError:
+        proc.kill()
+        try:
+            await proc.wait()
+        except Exception:
+            pass
+        raise
 
     if proc.returncode not in (0, 1):  # 0=match, 1=no match; 2=erro
         # Provavel divergencia de syntax regex — fallback Python.
@@ -478,7 +490,20 @@ async def _edit_file(path: str, old_text: str, new_text: str) -> dict:
     if not p.exists():
         return {"error": f"Arquivo não encontrado: {path}"}
     try:
-        original = p.read_text(errors="replace")
+        # O_NOFOLLOW closes the TOCTOU race where a symlink could be created
+        # between the path validation above and this read.
+        fd = os.open(str(p), os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            size = os.fstat(fd).st_size
+            if size > _EDIT_MAX_BYTES:
+                return {
+                    "error": f"Arquivo > {_EDIT_MAX_BYTES // 1_000_000}MB; "
+                    f"edição inline não suportada para arquivos desse tamanho"
+                }
+            raw = os.read(fd, size) if size > 0 else b""
+            original = raw.decode("utf-8", errors="replace")
+        finally:
+            os.close(fd)
         if old_text not in original:
             return {"error": "Texto não encontrado no arquivo. Verifique indentação e espaços."}
         count = original.count(old_text)

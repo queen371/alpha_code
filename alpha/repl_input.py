@@ -24,6 +24,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.styles import Style
 
 from .clipboard import read_image_from_clipboard
 
@@ -86,7 +87,33 @@ def _build_key_bindings(attached: dict[int, Path]) -> KeyBindings:
     def _(event):
         _attach_clipboard_image(event.current_buffer, attached)
 
+    @kb.add("s-tab")  # Shift+Tab toggles auto-accept-edits mode
+    def _(event):
+        from .display import toggle_auto_accept
+
+        toggle_auto_accept()
+        event.app.invalidate()  # redraw bottom toolbar
+
     return kb
+
+
+def _bottom_toolbar() -> "ANSI":
+    """Status line below the prompt showing auto-accept mode + hint."""
+    from .display import C, c, is_auto_accept
+
+    if is_auto_accept():
+        text = (
+            f" {c(C.GREEN + C.BOLD, '»»')} "
+            f"{c(C.GREEN + C.BOLD, 'accept edits on')} "
+            f"{c(C.GRAY, '(shift+tab to cycle) · ctrl+c to interrupt')}"
+        )
+    else:
+        text = (
+            f" {c(C.GRAY, '»»')} "
+            f"{c(C.GRAY, 'accept edits off')} "
+            f"{c(C.GRAY_DARK, '(shift+tab to enable) · ctrl+c to interrupt')}"
+        )
+    return ANSI(text)
 
 
 def _resolve_placeholders(text: str, attached: dict[int, Path]) -> tuple[str, list[Path]]:
@@ -168,12 +195,28 @@ class _SlashCompleter(Completer):
 _SESSION: PromptSession | None = None
 
 
+# Style applied to the user-typed text so it's visually distinct from the
+# prompt arrow and from agent output. Bright neon green + bold mirrors the
+# Alpha brand and matches the indicator/prompt arrow tint.
+_INPUT_STYLE = Style.from_dict({
+    "": "fg:#5fff5f bold",  # the empty class styles unstyled buffer text
+    # prompt_toolkit gives bottom-toolbar a reversed bg by default, which
+    # turns our ANSI greens into hard-to-read fg-on-light. Force a dark bg
+    # + neutral fg so the embedded ANSI escapes (from _bottom_toolbar) win.
+    "bottom-toolbar": "bg:#1a1a1a fg:#cccccc noreverse",
+    "bottom-toolbar.text": "bg:#1a1a1a fg:#cccccc noreverse",
+})
+
+
 def _get_session() -> PromptSession:
     global _SESSION
     if _SESSION is None:
         _SESSION = PromptSession(
             completer=_SlashCompleter(),
             complete_while_typing=True,
+            bottom_toolbar=_bottom_toolbar,
+            style=_INPUT_STYLE,
+            include_default_pygments_style=False,
         )
     return _SESSION
 

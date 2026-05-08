@@ -16,17 +16,55 @@ Pure async Python, minimal dependencies (`httpx`, `python-dotenv`, `ddgs`, `pyya
 
 ## Install
 
+Requires Python ≥ 3.11.
+
 ```bash
 git clone <your-repo-url>/Alpha_Code.git
 cd Alpha_Code
+```
+
+Then follow the section for your OS.
+
+### Linux / WSL
+
+```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 cp .env.example .env  # then fill in your API keys
 ```
 
-Requires Python ≥ 3.11. For image clipboard paste on Linux, install `xclip` (X11) or `wl-clipboard` (Wayland).
+For image clipboard paste, install `xclip` (X11) or `wl-clipboard` (Wayland):
 
-Optional extras:
+```bash
+sudo apt install xclip          # Debian/Ubuntu (X11)
+sudo apt install wl-clipboard   # Debian/Ubuntu (Wayland)
+```
+
+### macOS
+
+```bash
+brew install python@3.11        # if you don't already have 3.11+
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
+cp .env.example .env
+```
+
+Image clipboard paste works out of the box (uses native `pbpaste`).
+
+### Windows (PowerShell)
+
+```powershell
+py -3.11 -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -e .
+copy .env.example .env
+```
+
+If `Activate.ps1` is blocked, run once: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+
+For image clipboard paste, the recommended path is **WSL2 + xclip** — native PowerShell handles text fine, but the image-grab path in `alpha/clipboard.py` is tested against Linux/macOS clipboard tools.
+
+### Optional extras (all OSes)
 
 ```bash
 pip install -e ".[browser]"   # adds Playwright tools

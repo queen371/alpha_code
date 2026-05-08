@@ -78,16 +78,16 @@ async def _run_once(messages, user_message, provider, temperature, get_tool_fn, 
             event_type = event.get("type", "")
 
             if event_type == "token":
-                indicator.stop()
                 text = event.get("text", "")
                 sys.stdout.write(text)
                 sys.stdout.flush()
                 full_reply += text
+                # Provider usage payload arrives only at end-of-stream, so
+                # the spinner shows a chars/4 estimate accumulated as bytes
+                # arrive (rounding deferred to render time).
+                indicator.add_streamed_text(text)
 
             elif event_type == "tool_call":
-                indicator.stop()
-                # Break out of any in-flight content line so the tool call
-                # renders cleanly below, instead of glued to the prose.
                 if full_reply and not full_reply.endswith("\n"):
                     sys.stdout.write("\n")
                     sys.stdout.flush()
@@ -98,16 +98,17 @@ async def _run_once(messages, user_message, provider, temperature, get_tool_fn, 
                 indicator.start(label_for_tool(event["name"]))
 
             elif event_type == "tool_result":
-                indicator.stop()
                 tr_args = pending_args.pop(event["name"], None)
                 print_tool_result(event["name"], event.get("result", {}), args=tr_args)
                 indicator.start("Think")
 
             elif event_type == "approval_needed":
-                indicator.stop()
+                # Hide the spinner so input() echoes cleanly. Scroll region
+                # stays active; the next tool_call/tool_result event calls
+                # start() which clears the pause and redraws.
+                indicator.pause()
 
             elif event_type == "context_compressed":
-                indicator.stop()
                 print_context_compressed(event.get("before", 0), event.get("after", 0))
                 indicator.start("Think")
 
