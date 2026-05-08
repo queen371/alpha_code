@@ -214,7 +214,90 @@ default. Add an `allow` rule above to auto-approve specific ones.
 
 ---
 
-## 6. Approval flow
+## 6. Skills — creating, sharing, hiding
+
+Skills are markdown playbooks (`SKILL.md`) the agent loads on demand.
+Browse them with `/skills`, invoke with `/<skill-name> [args]`.
+
+### Where they live
+
+The Alpha registry searches **two** paths and merges what it finds:
+
+| Path | In git? | Use for |
+|---|---|---|
+| `<project>/skills/<name>/SKILL.md` | **Yes** — tracked unless you ignore it | Skills that ship with the project (deploy, lint, project workflows). The team gets them on `git pull`. |
+| `~/.alpha/skills/<name>/SKILL.md` | **No** — outside the repo | Personal shortcuts, skills with embedded tokens, anything you don't want shared. |
+
+Both paths are loaded the same way at startup. The skill name must be
+unique across both — if a name collides, the project copy wins.
+
+### Anatomy
+
+```markdown
+---
+name: my-skill
+description: Use when the user asks for X or says "do Y" or "fix Z".
+metadata:
+  alpha:
+    emoji: "🔧"
+    requires:
+      bins: [tool1, tool2]    # optional — checked at /skills time
+---
+
+# My Skill
+
+Free-form markdown. Steps, commands, gotchas.
+```
+
+The `description` is what the model uses to decide when to load the
+skill on its own (without `/skill-name`). Write it as a trigger sentence.
+
+### Picking a location
+
+| Scenario | Where |
+|---|---|
+| Project deploy / build / domain workflow | `<project>/skills/` |
+| Skill with API tokens or private credentials | `~/.alpha/skills/` |
+| Personal shortcut you use across many projects | `~/.alpha/skills/` |
+| Experimental — not ready to publish | `~/.alpha/skills/`, move to `<project>/skills/` once stable |
+
+### Don't commit secrets
+
+Skills under `<project>/skills/` go to git like any other file. If your
+SKILL.md inlines an API key, token, or password, **it ends up in the
+repo history**. Two safer options:
+
+1. Put the skill in `~/.alpha/skills/` so it never enters git.
+2. Reference an env var in the body (`${MY_TOKEN}`) and load the value
+   from `.env` (which is already in `.gitignore`).
+
+### Moving between locations
+
+```bash
+# Personal → project (publish to the team)
+mv ~/.alpha/skills/my-skill skills/
+git add skills/my-skill && git commit -m "feat(skills): add my-skill"
+
+# Project → personal (unpublish)
+git rm -r skills/my-skill
+mv skills/my-skill ~/.alpha/skills/   # if you kept a copy
+```
+
+### Authoring with Alpha itself
+
+Easiest way to scaffold a new skill:
+
+```
+> /skill-creator quero criar uma skill chamada deploy-prod
+                 que faz git pull + npm build + pm2 restart
+```
+
+`skill-creator` (the bundled meta-skill) walks the agent through
+frontmatter, description triggers, body structure, and validation.
+
+---
+
+## 7. Approval flow
 
 When the agent calls a `DESTRUCTIVE` tool that isn't in your `allow` list,
 you'll see:
@@ -235,7 +318,7 @@ automatically without prompts.
 
 ---
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 **`API key not set for <provider>`** — The `*_API_KEY` env var is missing.
 Check `.env` is in the project root and `pip install -e .` was run with
@@ -264,7 +347,7 @@ current state of every skill (complete / inactive / broken).
 
 ---
 
-## 8. Tips
+## 9. Tips
 
 - Drop a project-level `CLAUDE.md` (or any file containing project context)
   and reference it in your prompt: *"siga o que o CLAUDE.md diz"*.
