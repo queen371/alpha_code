@@ -308,24 +308,32 @@ async def _query_sqlite(db_path: str, query: str, read_only: bool) -> dict:
         }
 
 
-def _validate_pg_ssrf(connection: str) -> dict | None:
+async def _validate_pg_ssrf(connection: str) -> dict | None:
     """SSRF guard for PostgreSQL connection strings (#D013 V1.0).
 
     Returns an error dict if the connection targets a private/internal IP,
     None if the connection passes. Helper extracted from the duplicated
     inline check that lived in `_query_database` and `_describe_table`.
+
+    AUDIT_V1.2 #002: a versao sincrona chamava `_is_private_ip` que faz
+    `socket.getaddrinfo` bloqueante (ate 5s no DNS timeout). Em async
+    function isso bloqueia o event loop inteiro — tasks paralelas param,
+    UI de approval congela, loop detection pode disparar falsamente.
+    `asyncio.to_thread` move a resolucao DNS para o thread pool default.
     """
     try:
         parsed_url = urlparse(connection)
         pg_hostname = parsed_url.hostname
-        if pg_hostname and _is_private_ip(pg_hostname):
-            return {
-                "error": (
-                    f"Conexão a IP privado/interno bloqueada por segurança "
-                    f"(SSRF protection): {pg_hostname}"
-                ),
-                "blocked": True,
-            }
+        if pg_hostname:
+            is_private = await asyncio.to_thread(_is_private_ip, pg_hostname)
+            if is_private:
+                return {
+                    "error": (
+                        f"Conexão a IP privado/interno bloqueada por segurança "
+                        f"(SSRF protection): {pg_hostname}"
+                    ),
+                    "blocked": True,
+                }
     except Exception:
         return {"error": "Connection string inválida para PostgreSQL"}
     return None
@@ -347,7 +355,7 @@ async def _query_database(
         return await _query_sqlite(connection, query, read_only)
 
     elif db_type == "postgresql":
-        ssrf_error = _validate_pg_ssrf(connection)
+        ssrf_error = await _validate_pg_ssrf(connection)
         if ssrf_error is not None:
             return ssrf_error
 
@@ -424,7 +432,7 @@ async def _describe_table(connection: str, table: str, db_type: str = "sqlite") 
             read_only=True,
         )
     elif db_type == "postgresql":
-        ssrf_error = _validate_pg_ssrf(connection)
+        ssrf_error = await _validate_pg_ssrf(connection)
         if ssrf_error is not None:
             return ssrf_error
 

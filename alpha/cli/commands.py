@@ -380,8 +380,23 @@ def _handle_model(ctx: ReplContext, parts: list[str]) -> DispatchResult:
         print(c(C.RED, f"  {target} not available — set the API key first."))
         return DispatchResult.CONTINUE
 
+    try:
+        new_cfg = get_provider_config(target)
+    except RuntimeError as e:
+        print(c(C.RED, f"  Error: {e}"))
+        return DispatchResult.CONTINUE
+
     ctx.provider = target
-    ctx.cfg = get_provider_config(target)
+    ctx.cfg = new_cfg
+    # Apply active_agent model override (e.g. named agent profiles)
+    if ctx.active_agent and ctx.active_agent.model:
+        ctx.cfg["model"] = ctx.active_agent.model
+    # Rebuild system prompt for new provider and reset conversation state.
+    # Carrying over messages from a different provider confuses smaller models.
+    ctx.system_prompt = build_system_prompt(ctx.active_agent)
+    ctx.messages[:] = [{"role": "system", "content": ctx.system_prompt}]
+    ctx.history.clear()
+    ctx.session_id = generate_session_id()
     print(
         f"  {c(C.GREEN, '✓')} Switched to {c(C.CYAN, ctx.provider)} → {ctx.cfg['model']}"
     )

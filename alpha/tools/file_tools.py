@@ -373,7 +373,11 @@ async def _glob_files(pattern: str, path: str = ".") -> dict:
                   ".pytest_cache", ".ruff_cache", "dist", "build"}
     matches = []
     skipped_outside = 0
-    for match in p.glob(pattern):
+    try:
+        glob_iter = p.glob(pattern)
+    except PermissionError as e:
+        return {"error": f"Permissão negada ao acessar: {e}"}
+    for match in glob_iter:
         # Skip subdirectories de noise para nao ler 100K entries em monorepos
         try:
             rel = match.relative_to(p)
@@ -427,6 +431,16 @@ async def _write_file(path: str, content: str) -> dict:
     except PermissionError as e:
         return {"error": str(e)}
     try:
+        # Snapshot prior contents (best-effort, only used for the UI diff —
+        # never returned to the LLM since the executor strips _-prefixed keys).
+        previous_content = ""
+        existed = p.exists()
+        if existed and p.is_file():
+            try:
+                previous_content = p.read_text(errors="replace")
+            except Exception:
+                previous_content = ""
+
         p.parent.mkdir(parents=True, exist_ok=True)
         # Re-validate resolved path after mkdir (directory could have been swapped)
         p_resolved = Path(path).expanduser().resolve()
@@ -439,7 +453,12 @@ async def _write_file(path: str, content: str) -> dict:
             os.write(fd, data)
         finally:
             os.close(fd)
-        return {"path": str(p), "bytes_written": len(data)}
+        return {
+            "path": str(p),
+            "bytes_written": len(data),
+            "_previous_content": previous_content,
+            "_created": not existed,
+        }
     except OSError as e:
         if e.errno == 40:  # ELOOP — path is a symlink
             return {"error": "Acesso negado: operação de escrita em symlinks não é permitida"}

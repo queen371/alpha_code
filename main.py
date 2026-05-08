@@ -16,6 +16,7 @@ import textwrap
 
 from alpha.agents import get_agent
 from alpha.attachments import build_user_content
+from alpha.ocr import ocr_images_sync
 from alpha.config import (
     DEFAULT_PROVIDER,
     get_available_providers,
@@ -56,8 +57,9 @@ async def _run_once(messages, user_message, provider, temperature, get_tool_fn, 
     from alpha.agent import run_agent
 
     full_reply = ""
-    indicator = ThinkingIndicator("Thinking")
+    indicator = ThinkingIndicator("Think")
     indicator.start()
+    pending_args: dict[str, dict] = {}
 
     try:
         async for event in run_agent(
@@ -81,13 +83,16 @@ async def _run_once(messages, user_message, provider, temperature, get_tool_fn, 
 
             elif event_type == "tool_call":
                 indicator.stop()
-                print_tool_call(event["name"], event.get("args", {}), event.get("safety", "safe"))
+                tc_args = event.get("args", {}) or {}
+                print_tool_call(event["name"], tc_args, event.get("safety", "safe"))
+                pending_args[event["name"]] = tc_args if isinstance(tc_args, dict) else {}
                 indicator.start(f"Executando {event['name']}")
 
             elif event_type == "tool_result":
                 indicator.stop()
-                print_tool_result(event["name"], event.get("result", {}))
-                indicator.start("Thinking")
+                tr_args = pending_args.pop(event["name"], None)
+                print_tool_result(event["name"], event.get("result", {}), args=tr_args)
+                indicator.start("Think")
 
             elif event_type == "approval_needed":
                 indicator.stop()
@@ -95,7 +100,7 @@ async def _run_once(messages, user_message, provider, temperature, get_tool_fn, 
             elif event_type == "context_compressed":
                 indicator.stop()
                 print_context_compressed(event.get("before", 0), event.get("after", 0))
-                indicator.start("Thinking")
+                indicator.start("Think")
 
             elif event_type == "done":
                 indicator.stop()
@@ -263,11 +268,26 @@ def run_repl(provider: str, temperature: float):
         cwd = os.getcwd()
         contextualized = f"[CWD: {cwd}]\n{user_input}"
         if image_paths and not cfg.get("supports_vision", False):
-            print_error(
-                f"Provider '{provider}' (modelo {cfg['model']}) nao suporta imagens. "
-                f"Imagem(s) ignorada(s). Use /provider para trocar para um vision-capable "
-                f"(ex: openai, anthropic) ou descreva o conteudo textualmente."
-            )
+            gemini_key = os.getenv("GEMINI_API_KEY", "")
+            if gemini_key:
+                sys.stdout.write(f"  {c(C.GRAY, '✾ Analisando imagem...')}")
+                sys.stdout.flush()
+                ocr_text = ocr_images_sync(image_paths, gemini_key)
+                sys.stdout.write("\r\033[K")
+                sys.stdout.flush()
+                if ocr_text:
+                    contextualized = (
+                        f"{contextualized}\n\n"
+                        f"[Conteudo extraido da imagem via OCR (Gemini)]:\n{ocr_text}"
+                    )
+                else:
+                    print_error("  OCR falhou — imagem ignorada.")
+            else:
+                print_error(
+                    f"Provider '{provider}' (modelo {cfg['model']}) nao suporta imagens. "
+                    f"Imagem(s) ignorada(s). Defina GEMINI_API_KEY para OCR automatico "
+                    f"ou use /provider para um modelo vision-capable (google, openai, anthropic)."
+                )
             image_paths = []
         user_content = build_user_content(
             contextualized, image_paths, vision_format=cfg.get("vision_format", "openai")

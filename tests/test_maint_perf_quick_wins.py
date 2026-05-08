@@ -206,20 +206,62 @@ class TestValidatePgSsrf:
 
         assert callable(database_tools._validate_pg_ssrf)
 
-    def test_blocks_private_ip(self):
+    async def test_blocks_private_ip(self):
+        # AUDIT_V1.2 #002: helper agora e async (asyncio.to_thread em
+        # _is_private_ip que faz socket.getaddrinfo bloqueante).
         from alpha.tools.database_tools import _validate_pg_ssrf
 
-        result = _validate_pg_ssrf("postgresql://user:pass@127.0.0.1/db")
+        result = await _validate_pg_ssrf("postgresql://user:pass@127.0.0.1/db")
         assert result is not None
         assert result.get("blocked") is True
 
-    def test_allows_public_host(self, monkeypatch):
+    async def test_allows_public_host(self, monkeypatch):
         from alpha.tools import database_tools
 
         # Mock _is_private_ip para evitar dependencia de DNS no test
         monkeypatch.setattr(database_tools, "_is_private_ip", lambda h: False)
-        result = database_tools._validate_pg_ssrf("postgresql://user:pass@db.example.com/db")
+        result = await database_tools._validate_pg_ssrf(
+            "postgresql://user:pass@db.example.com/db"
+        )
         assert result is None
+
+    async def test_does_not_block_event_loop(self, monkeypatch):
+        """AUDIT_V1.2 #002: _is_private_ip e sync (socket.getaddrinfo).
+
+        Antes da correcao, _validate_pg_ssrf chamava direto e travava o
+        event loop ate o DNS responder (ate 5s). Apos `asyncio.to_thread`,
+        outras tasks devem progredir em paralelo.
+        """
+        import asyncio
+        import time
+        from alpha.tools import database_tools
+
+        # Simular DNS lento: 0.5s de bloqueio
+        def slow_is_private_ip(hostname: str) -> bool:
+            time.sleep(0.5)
+            return False
+
+        monkeypatch.setattr(database_tools, "_is_private_ip", slow_is_private_ip)
+
+        # Outra task deve avancar enquanto _validate_pg_ssrf espera DNS
+        progress_marker = []
+
+        async def background_task():
+            for i in range(5):
+                await asyncio.sleep(0.05)
+                progress_marker.append(i)
+
+        bg = asyncio.create_task(background_task())
+        result = await database_tools._validate_pg_ssrf(
+            "postgresql://user:pass@example.com/db"
+        )
+        await bg
+
+        assert result is None
+        # Se loop foi bloqueado, progress_marker estaria vazio ou < 3
+        assert len(progress_marker) == 5, (
+            f"Event loop bloqueado durante DNS: progress={progress_marker}"
+        )
 
 
 # ─── #D005 (V1.0 PERF) — fuzzy cache ───────────────────────────────

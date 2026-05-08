@@ -62,6 +62,8 @@ _HARD_BLOCKED_PATTERNS = [
     # Firewall flush/reset
     r"\b(iptables|ip6tables|nft)\b\s+(?:.*\s+)?(?:-F|-X|--flush)(?:\s|$)",
     r"\bufw\s+(reset|disable)\b",
+    # find with -fprint/-fprintf writes output to arbitrary files (sandbox escape)
+    r"\bfind\s+.*-fprintf?\s",
 ]
 
 # #D020: 27 regex viraram uma alternation unica. Antes `_validate_command`

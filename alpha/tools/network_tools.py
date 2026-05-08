@@ -270,11 +270,9 @@ async def _http_request_urllib(
         # Build opener that does NOT follow redirects (DNS rebinding fix)
         opener = urllib.request.build_opener(_NoRedirectHandler)
         # Use resolved IP in URL to prevent DNS rebinding between validate and connect.
-        # AUDIT_V1.2 #016: `str.replace` falhava em hostname uppercase (`HTTPS://EXAMPLE.com`)
-        # ou IPv6 (precisa wrapping em brackets). `_rewrite_url_with_ip` (urlunparse-based)
-        # cobre ambos — mesma helper usada no path aiohttp.
-        parsed = urlparse(url)
-        if resolved_ip and parsed.hostname:
+        # AUDIT_V1.2 #016: reusa `_rewrite_url_with_ip` (urlunparse-based) em vez de
+        # `str.replace` que falhava com hostnames uppercase e IPv6.
+        if resolved_ip and hostname:
             fixed_url = _rewrite_url_with_ip(parsed, resolved_ip)
         else:
             fixed_url = url

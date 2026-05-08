@@ -35,6 +35,7 @@ class C:
     # Core palette (Kali-inspired: green dominant, red for danger)
     GREEN = "\033[38;5;82m"       # Bright green (Kali signature)
     GREEN_DARK = "\033[38;5;34m"  # Dark green (secondary)
+    GREEN_NEON = "\033[38;5;46m"  # Neon green (thinking indicator)
     RED = "\033[38;5;196m"        # Bright red (errors/critical)
     RED_DARK = "\033[38;5;124m"   # Dark red (warnings)
     YELLOW = "\033[38;5;220m"     # Yellow (caution/approval)
@@ -160,8 +161,67 @@ def _print_todo_list(todos: list) -> None:
 
 
 
-def print_tool_result(name: str, result: dict) -> None:
-    """Display a tool result with status-aware formatting."""
+_DIFF_MAX_LINES = 40
+
+
+def _render_diff(old_text: str, new_text: str, path: str | None = None) -> None:
+    """Render a unified diff with green/red highlighted blocks (git-style).
+
+    Lines added are shown on a green background, removed on red, context in
+    gray. Output is bounded by `_DIFF_MAX_LINES` to avoid flooding the
+    terminal on large rewrites.
+    """
+    import difflib
+
+    old_lines = old_text.splitlines()
+    new_lines = new_text.splitlines()
+
+    if path:
+        print(f"  {c(C.GRAY_DARK, '┌─')} {c(C.CYAN, path)}")
+
+    diff = list(difflib.unified_diff(old_lines, new_lines, n=2, lineterm=""))
+    if not diff:
+        print(f"  {c(C.GRAY_DARK, '│')} {c(C.GRAY, '(no textual changes)')}")
+        return
+
+    # Skip the file headers (---/+++) since we already printed the path.
+    body = [ln for ln in diff if not (ln.startswith("---") or ln.startswith("+++"))]
+
+    shown = 0
+    for line in body:
+        if shown >= _DIFF_MAX_LINES:
+            remaining = len(body) - shown
+            print(f"  {c(C.GRAY_DARK, '│')} {c(C.GRAY, f'... ({remaining} more diff lines)')}")
+            break
+
+        if line.startswith("@@"):
+            print(f"  {c(C.GRAY_DARK, '│')} {c(C.CYAN + C.DIM, line[:DISPLAY_LINE_TRUNCATE])}")
+        elif line.startswith("+"):
+            text = line[1:]
+            if len(text) > DISPLAY_LINE_TRUNCATE:
+                text = text[:DISPLAY_LINE_TRUNCATE - 3] + "..."
+            print(f"  {c(C.GRAY_DARK, '│')} {c(C.BG_GREEN + C.GREEN, '+ ' + text)}")
+        elif line.startswith("-"):
+            text = line[1:]
+            if len(text) > DISPLAY_LINE_TRUNCATE:
+                text = text[:DISPLAY_LINE_TRUNCATE - 3] + "..."
+            print(f"  {c(C.GRAY_DARK, '│')} {c(C.BG_RED + C.RED, '- ' + text)}")
+        else:
+            text = line[1:] if line.startswith(" ") else line
+            if len(text) > DISPLAY_LINE_TRUNCATE:
+                text = text[:DISPLAY_LINE_TRUNCATE - 3] + "..."
+            print(f"  {c(C.GRAY_DARK, '│')} {c(C.GRAY, '  ' + text)}")
+        shown += 1
+
+    print(f"  {c(C.GRAY_DARK, '└─')}")
+
+
+def print_tool_result(name: str, result: dict, args: dict | None = None) -> None:
+    """Display a tool result with status-aware formatting.
+
+    For `edit_file` / `write_file`, renders a colored unified diff from the
+    args passed in (old_text/new_text or new content vs current file).
+    """
     border = c(C.GRAY_DARK, "│")
 
     if isinstance(result, dict):
@@ -182,6 +242,21 @@ def print_tool_result(name: str, result: dict) -> None:
             warning = result.get("warning")
             if warning:
                 print(f"  {c(C.YELLOW, '⚠')} {c(C.YELLOW, warning)}")
+            return
+
+        # Diff rendering for edits — show what was added vs. removed.
+        if name == "edit_file" and isinstance(args, dict):
+            old_text = str(args.get("old_text", ""))
+            new_text = str(args.get("new_text", ""))
+            path = result.get("path") or args.get("path")
+            _render_diff(old_text, new_text, str(path) if path else None)
+            return
+
+        if name == "write_file" and isinstance(args, dict):
+            new_content = str(args.get("content", ""))
+            path = result.get("path") or args.get("path")
+            old_content = result.get("_previous_content", "")
+            _render_diff(old_content, new_content, str(path) if path else None)
             return
 
         # Show output/content preview
@@ -473,7 +548,7 @@ class ThinkingIndicator:
     Call start() before work begins and stop() before printing other output.
     """
 
-    def __init__(self, label: str = "Thinking", style: str = "flower") -> None:
+    def __init__(self, label: str = "Think", style: str = "flower") -> None:
         self.label = label
         self.frames = _FLOWER_FRAMES if style == "flower" else _SPINNER_FRAMES
         self._task: asyncio.Task | None = None
@@ -517,7 +592,7 @@ class ThinkingIndicator:
                 frame = self.frames[i % len(self.frames)]
                 elapsed = time.monotonic() - self._start_time
                 dur = f" ({int(elapsed)}s)" if elapsed >= 1 else ""
-                line = f"\r{c(C.RED + C.BOLD, frame)} {c(C.RED + C.BOLD, self.label + dur)}\033[K"
+                line = f"\r{c(C.GREEN_NEON + C.BOLD, frame)} {c(C.GREEN_NEON + C.BOLD, self.label + dur)}\033[K"
                 sys.stdout.write(line)
                 sys.stdout.flush()
                 i += 1

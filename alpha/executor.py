@@ -83,6 +83,10 @@ def _format_result(result: dict, tool_name: str) -> str:
     versao antiga fatiava no meio do JSON ja serializado, podendo cortar em
     `\\uXXXX` ou em multi-byte UTF-8 e produzir saida com texto corrompido.
     """
+    # Drop underscore-prefixed keys: convention for UI-only fields (e.g.
+    # `_previous_content` used to render the edit diff in the terminal,
+    # but pointless and bloating to send back to the LLM).
+    result = {k: v for k, v in result.items() if not (isinstance(k, str) and k.startswith("_"))}
     estimated = sum(len(str(v)) for v in result.values()) + 100
     if estimated <= TOOL_RESULT_MAX_CHARS:
         return json.dumps(result, ensure_ascii=False)

@@ -52,6 +52,9 @@ _PROVIDERS = {
         "api_key_env": "DEEPSEEK_API_KEY",
         "model_env": "DEEPSEEK_MODEL",
         "default_model": "deepseek-v4-pro",
+        # Vision: disponivel APENAS no chat web (chat.deepseek.com) como
+        # beta fechado (Image Recognition Mode, Apr 2026). A API REST
+        # NAO aceita image_url blocks — retorna HTTP 400.
         "supports_vision": False,
     },
     "openai": {
@@ -68,6 +71,17 @@ _PROVIDERS = {
         "default_model": "claude-sonnet-4-6",
         "api_format": "anthropic",
         "supports_vision": True,
+    },
+    "google": {
+        "base_url": os.getenv(
+            "GEMINI_API_BASE_URL",
+            "https://generativelanguage.googleapis.com/v1beta/openai/",
+        ),
+        "api_key_env": "GEMINI_API_KEY",
+        "model_env": "GEMINI_MODEL",
+        "default_model": "gemini-2.5-flash",  # melhor custo-beneficio com visao
+        "supports_vision": True,
+        "vision_format": "openai",
     },
     "grok": {
         "base_url": os.getenv("GROK_API_BASE_URL", "https://api.x.ai/v1"),

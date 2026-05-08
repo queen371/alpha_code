@@ -65,3 +65,11 @@ docs/SKILLS_AUDIT.md
 
 # Backup of .git/ (local snapshot before risky operations)
 .git.backup/
+
+# Local-only skills (not distributed with Alpha)
+skills/git-save/
+skills/audit-1-front-scan/
+skills/audit-2-front-review/
+skills/audit-3-front-ux/
+skills/audit-4-front-perf/
+skills/audit-front-deep/
