@@ -287,6 +287,46 @@ def _parse_and_validate_args(
     return args, None
 
 
+# ── Shared tool-call validation (parallel + sequential) ──
+# #D004: extrai o loop de validacao per-tc (~30 linhas) duplicado entre
+# `execute_tool_calls` e `_execute_sequential`. Ambas fazem: lookup →
+# parse args → enforce workspace → extract safety. Centralizado aqui.
+
+def _validate_tool_call(
+    tc: dict,
+    get_tool_fn: Callable | None,
+    workspace: str | None,
+) -> tuple[dict | None, str, dict, str, str, object]:
+    """Validate one tool call. Returns (error_result, tool_name, args, safety_str, error_category, tool_def).
+
+    If error_result is not None: validation failed — caller yields error events.
+    Otherwise: (None, tool_name, args_with_workspace, safety_str, "", tool_def) — proceed to execute.
+    """
+    tool_name = tc["name"]
+    tool_def = get_tool_fn(tool_name) if get_tool_fn else None
+
+    if tool_def is None:
+        return (
+            {"error": f"Unknown tool: {tool_name}"},
+            tool_name, {}, "unknown", "unknown_tool", None,
+        )
+
+    args, parse_error = _parse_and_validate_args(tc, tool_def)
+    if parse_error is not None:
+        return (parse_error, tool_name, {}, "denied", "parse_error", tool_def)
+
+    ok, new_args, err = _enforce_workspace(workspace, tool_name, args)
+    if not ok:
+        return (
+            {"error": err, "workspace_violation": True},
+            tool_name, {}, "denied", "violation", tool_def,
+        )
+
+    safety = getattr(tool_def, "safety", None)
+    safety_str = safety.value if hasattr(safety, "value") else "safe"
+    return (None, tool_name, new_args, safety_str, "", tool_def)
+
+
 async def execute_tool_calls(
     tool_calls: list[dict],
     messages: list[dict],
@@ -320,38 +360,16 @@ async def execute_tool_calls(
     prepared = []  # (tc, tool_name, args, tool_def, safety_str)
 
     for tc in tool_calls:
-        tool_name = tc["name"]
-        tool_def = get_tool_fn(tool_name) if get_tool_fn else None
-
-        if tool_def is None:
-            result = _annotate_error(
-                {"error": f"Unknown tool: {tool_name}"}, "unknown_tool"
-            )
-            yield {"type": "tool_call", "name": tool_name, "args": {}, "safety": "unknown"}
-            yield {"type": "tool_result", "name": tool_name, "result": result}
-            _append_tool_msg(messages, tc["id"], result, tool_name)
+        error, tool_name, args, safety_str, category, tool_def = _validate_tool_call(
+            tc, get_tool_fn, workspace
+        )
+        if error is not None:
+            error = _annotate_error(error, category)
+            yield {"type": "tool_call", "name": tool_name, "args": {}, "safety": safety_str}
+            yield {"type": "tool_result", "name": tool_name, "result": error}
+            _append_tool_msg(messages, tc["id"], error, tool_name)
             continue
 
-        args, parse_error = _parse_and_validate_args(tc, tool_def)
-        if parse_error is not None:
-            parse_error = _annotate_error(parse_error, "parse_error")
-            yield {"type": "tool_call", "name": tool_name, "args": {}, "safety": "denied"}
-            yield {"type": "tool_result", "name": tool_name, "result": parse_error}
-            _append_tool_msg(messages, tc["id"], parse_error, tool_name)
-            continue
-
-        ok, args, err = _enforce_workspace(workspace, tool_name, args)
-        if not ok:
-            result = _annotate_error(
-                {"error": err, "workspace_violation": True}, "violation"
-            )
-            yield {"type": "tool_call", "name": tool_name, "args": args, "safety": "denied"}
-            yield {"type": "tool_result", "name": tool_name, "result": result}
-            _append_tool_msg(messages, tc["id"], result, tool_name)
-            continue
-
-        safety = getattr(tool_def, "safety", None)
-        safety_str = safety.value if hasattr(safety, "value") else "safe"
         prepared.append((tc, tool_name, args, tool_def, safety_str))
 
     for tc, tool_name, args, tool_def, safety_str in prepared:
@@ -436,38 +454,16 @@ async def _execute_sequential(
     is_denied_fn: Callable[[str, dict], tuple[bool, str]] = _no_deny,
 ) -> AsyncGenerator[dict, None]:
     for tc in tool_calls:
-        tool_name = tc["name"]
-        tool_def = get_tool_fn(tool_name) if get_tool_fn else None
-
-        if tool_def is None:
-            result = _annotate_error(
-                {"error": f"Unknown tool: {tool_name}"}, "unknown_tool"
-            )
-            yield {"type": "tool_call", "name": tool_name, "args": {}, "safety": "unknown"}
-            yield {"type": "tool_result", "name": tool_name, "result": result}
-            _append_tool_msg(messages, tc["id"], result, tool_name)
+        error, tool_name, args, safety_str, category, tool_def = _validate_tool_call(
+            tc, get_tool_fn, workspace
+        )
+        if error is not None:
+            error = _annotate_error(error, category)
+            yield {"type": "tool_call", "name": tool_name, "args": {}, "safety": safety_str}
+            yield {"type": "tool_result", "name": tool_name, "result": error}
+            _append_tool_msg(messages, tc["id"], error, tool_name)
             continue
 
-        args, parse_error = _parse_and_validate_args(tc, tool_def)
-        if parse_error is not None:
-            parse_error = _annotate_error(parse_error, "parse_error")
-            yield {"type": "tool_call", "name": tool_name, "args": {}, "safety": "denied"}
-            yield {"type": "tool_result", "name": tool_name, "result": parse_error}
-            _append_tool_msg(messages, tc["id"], parse_error, tool_name)
-            continue
-
-        ok, args, err = _enforce_workspace(workspace, tool_name, args)
-        if not ok:
-            result = _annotate_error(
-                {"error": err, "workspace_violation": True}, "violation"
-            )
-            yield {"type": "tool_call", "name": tool_name, "args": args, "safety": "denied"}
-            yield {"type": "tool_result", "name": tool_name, "result": result}
-            _append_tool_msg(messages, tc["id"], result, tool_name)
-            continue
-
-        safety = getattr(tool_def, "safety", None)
-        safety_str = safety.value if hasattr(safety, "value") else "safe"
         yield {"type": "tool_call", "name": tool_name, "args": args, "safety": safety_str}
 
         denied, reason = is_denied_fn(tool_name, args)

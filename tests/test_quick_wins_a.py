@@ -23,25 +23,22 @@ import pytest
 
 class TestCompositeImportsAtTop:
     def test_no_inline_imports_in_run_tool(self):
-        from alpha.tools import composite_tools
+        """Executor imports now live in _composite_helpers.py (post #030 split)."""
+        import inspect
 
-        src = inspect.getsource(composite_tools)
-        # `from ..executor import` deve aparecer no topo, nao dentro de
-        # `_run_tool` ou outras funcoes.
+        from alpha.tools import _composite_helpers
+
+        src = inspect.getsource(_composite_helpers)
         top_block, _, body = src.partition("\nasync def _run_tool")
-        # Tudo que esta antes do primeiro `async def` e o bloco de imports.
-        # Garantir que executor + file_tools + os/shlex estao la.
         assert "from ..executor import" in top_block
-        assert "from .file_tools import _validate_path_no_symlink" in top_block
-        assert "import os" in top_block
-        assert "import shlex" in top_block
 
     def test_no_inline_executor_import_in_function_body(self):
-        """Inline `from ..executor import` deveria ter sumido."""
-        from alpha.tools import composite_tools
+        """Executor import exists exactly once in _composite_helpers (not inline)."""
+        import inspect
 
-        src = inspect.getsource(composite_tools)
-        # Conta ocorrencias do import — esperamos exatamente 1 (no topo).
+        from alpha.tools import _composite_helpers
+
+        src = inspect.getsource(_composite_helpers)
         assert src.count("from ..executor import") == 1
 
 

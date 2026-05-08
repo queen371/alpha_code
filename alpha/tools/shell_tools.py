@@ -6,6 +6,7 @@ import shlex
 from pathlib import Path
 
 from . import ToolDefinition, ToolSafety, register_tool
+from ._subprocess_helpers import SubprocessTimeoutError, run_subprocess_safe
 from .safe_env import get_safe_env
 from .workspace import AGENT_WORKSPACE, assert_within_workspace
 
@@ -181,32 +182,19 @@ async def _execute_shell(command: str, cwd: str = None, timeout: int | None = No
                 if not seg_parts:
                     continue
 
-                proc = await asyncio.create_subprocess_exec(
-                    *seg_parts,
-                    stdin=asyncio.subprocess.PIPE if prev_output is not None else None,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=cwd,
-                    env=get_safe_env(),
-                )
                 try:
-                    stdout, stderr = await asyncio.wait_for(
-                        proc.communicate(input=prev_output), timeout=timeout
+                    r = await run_subprocess_safe(
+                        *seg_parts, timeout=timeout, cwd=cwd,
+                        stdin=prev_output,
                     )
-                except TimeoutError:
-                    proc.kill()
-                    await proc.wait()
+                except SubprocessTimeoutError:
                     return {
                         "error": f"Comando excedeu o timeout de {timeout}s",
                         "timeout": True,
                     }
-                except (asyncio.CancelledError, KeyboardInterrupt):
-                    proc.kill()
-                    await proc.wait()
-                    raise
-                prev_output = stdout
-                all_stderr += stderr
-                last_returncode = proc.returncode
+                prev_output = r.stdout
+                all_stderr += r.stderr
+                last_returncode = r.returncode
 
             return {
                 "exit_code": last_returncode,
@@ -214,34 +202,20 @@ async def _execute_shell(command: str, cwd: str = None, timeout: int | None = No
                 "stderr": all_stderr.decode(errors="replace")[:5000],
             }
         else:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd_parts,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-                env=get_safe_env(),
-            )
             try:
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            except TimeoutError:
-                proc.kill()
-                await proc.wait()
+                r = await run_subprocess_safe(
+                    *cmd_parts, timeout=timeout, cwd=cwd,
+                )
+            except SubprocessTimeoutError:
                 return {
                     "error": f"Comando excedeu o timeout de {timeout}s",
                     "timeout": True,
                 }
-            except (asyncio.CancelledError, KeyboardInterrupt):
-                # Sem este bloco, Ctrl+C deixa o subprocess rodando ate o
-                # fim (ex: `git push` ou `npm install` continua exfiltrando
-                # apesar do REPL ter "cancelado").
-                proc.kill()
-                await proc.wait()
-                raise
 
             return {
-                "exit_code": proc.returncode,
-                "stdout": stdout.decode(errors="replace")[:15000],
-                "stderr": stderr.decode(errors="replace")[:5000],
+                "exit_code": r.returncode,
+                "stdout": r.stdout.decode(errors="replace")[:15000],
+                "stderr": r.stderr.decode(errors="replace")[:5000],
             }
     except Exception as e:
         return {"error": str(e)}

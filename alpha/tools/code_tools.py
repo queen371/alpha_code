@@ -15,6 +15,7 @@ import sys
 import tempfile
 
 from . import ToolDefinition, ToolSafety, register_tool
+from ._subprocess_helpers import SubprocessTimeoutError, run_subprocess_safe
 from .safe_env import get_safe_env
 
 logger = logging.getLogger(__name__)
@@ -197,34 +198,20 @@ async def _execute_python(code: str, timeout: int | None = None) -> dict:
             f.write(code)
             f.flush()
             script_path = f.name
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-u",
-            script_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=get_safe_env(),
-        )
         try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except TimeoutError:
-            proc.kill()
-            await proc.wait()
+            r = await run_subprocess_safe(
+                sys.executable, "-u", script_path, timeout=timeout,
+            )
+        except SubprocessTimeoutError:
             return {
-                "error": f"Execução excedeu o timeout de {timeout}s",
+                "error": f"Execucao excedeu o timeout de {timeout}s",
                 "timeout": True,
             }
-        except (asyncio.CancelledError, KeyboardInterrupt):
-            # Sem este bloco, Ctrl+C durante codigo Python longo deixa o
-            # subprocess rodando ate o fim (loop infinito, fork bomb leve).
-            proc.kill()
-            await proc.wait()
-            raise
 
         return {
-            "exit_code": proc.returncode,
-            "stdout": stdout.decode(errors="replace")[:15000],
-            "stderr": stderr.decode(errors="replace")[:5000],
+            "exit_code": r.returncode,
+            "stdout": r.stdout.decode(errors="replace")[:15000],
+            "stderr": r.stderr.decode(errors="replace")[:5000],
         }
     except Exception as e:
         return {"error": str(e)}
@@ -271,35 +258,18 @@ async def _install_package(package: str) -> dict:
             "blocked": True,
         }
 
-    proc = await asyncio.create_subprocess_exec(
-        sys.executable,
-        "-m",
-        "pip",
-        "install",
-        "--no-cache-dir",
-        package,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=get_safe_env(),
-    )
     try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
-    except TimeoutError:
-        proc.kill()
-        await proc.wait()
-        return {"error": "Instalação excedeu timeout de 120s"}
-    except asyncio.CancelledError:
-        proc.kill()
-        try:
-            await proc.wait()
-        except Exception:
-            pass
-        raise
+        r = await run_subprocess_safe(
+            sys.executable, "-m", "pip", "install", "--no-cache-dir", package,
+            timeout=120,
+        )
+    except SubprocessTimeoutError:
+        return {"error": "Instalacao excedeu timeout de 120s"}
 
     return {
-        "exit_code": proc.returncode,
-        "stdout": stdout.decode(errors="replace")[:5000],
-        "stderr": stderr.decode(errors="replace")[:5000],
+        "exit_code": r.returncode,
+        "stdout": r.stdout.decode(errors="replace")[:5000],
+        "stderr": r.stderr.decode(errors="replace")[:5000],
     }
 
 

@@ -20,8 +20,8 @@ The agent runs an async generator loop:
 LLM call → tool detection → approval gate → tool execution → repeat
 ```
 
-Max 50 iterations per task. Events are yielded to the CLI for real-time
-streaming display.
+Max 100 iterations per task (`LIMITS["max_iterations"]` in `config.py`).
+Events are yielded to the CLI for real-time streaming display.
 
 ### Core flow
 

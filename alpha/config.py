@@ -21,7 +21,7 @@ DEFAULT_PROVIDER = os.getenv("ALPHA_PROVIDER", "deepseek")
 # ficam como aliases com retro-compat. Sub-agent limit tambem entra
 # aqui em vez de viver isolado em FEATURES.
 LIMITS = {
-    "max_iterations": 50,           # iteracoes do agent loop principal
+    "max_iterations": 100,          # iteracoes do agent loop principal
     "tool_result_max_chars": 12_000,
     "llm_timeout": 300,             # seconds per LLM call
     "max_messages": 500,            # hard cap antes de needs_compression

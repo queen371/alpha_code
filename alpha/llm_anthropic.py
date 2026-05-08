@@ -18,11 +18,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 from collections.abc import AsyncGenerator
 
 import httpx
 
-from .llm import _calc_backoff
+from ._rate_limiter import acquire_llm_token as _rate_limit_acquire
+
+from .llm import DsmlStripper, _calc_backoff
 
 logger = logging.getLogger(__name__)
 
@@ -246,12 +249,14 @@ async def stream_anthropic(
     accumulated_content = ""
     blocks: dict[int, dict] = {}  # index → {"type": "text"|"tool_use", ...}
     yielded_any = False
+    dsml_stripper = DsmlStripper()
 
     client = await _get_client(timeout)
     last_error: str | None = None
 
     for attempt in range(_ANTHROPIC_RETRY_MAX + 1):
         try:
+            await _rate_limit_acquire("anthropic")
             async with client.stream(
                 "POST", f"{base_url}/messages", json=payload, headers=headers
             ) as response:
@@ -300,14 +305,23 @@ async def stream_anthropic(
                             text = delta.get("text", "")
                             if text:
                                 block["text"] = block.get("text", "") + text
-                                accumulated_content += text
-                                yielded_any = True
-                                yield {"type": "content_token", "token": text}
+                                safe = dsml_stripper.feed(text)
+                                if safe:
+                                    accumulated_content += safe
+                                    yielded_any = True
+                                    yield {"type": "content_token", "token": safe}
                         elif delta.get("type") == "input_json_delta":
                             block["input_json"] = block.get("input_json", "") + delta.get("partial_json", "")
 
                     elif etype == "message_stop":
                         break
+
+            # Drain any unclosed `<…` tail held back during streaming.
+            tail = dsml_stripper.flush()
+            if tail:
+                accumulated_content += tail
+                yielded_any = True
+                yield {"type": "content_token", "token": tail}
 
             # Success — break out of retry loop
             last_error = None

@@ -179,7 +179,7 @@ class TestLimitsDict:
         from alpha.config import LIMITS
 
         assert "max_iterations" in LIMITS
-        assert LIMITS["max_iterations"] == 50
+        assert LIMITS["max_iterations"] == 100
 
     def test_subagent_max_iterations_lives_in_features_only(self):
         # `subagent_max_iterations` antes existia tambem em LIMITS, mas nada

@@ -16,6 +16,7 @@ from collections.abc import AsyncGenerator
 
 import httpx
 
+from ._rate_limiter import acquire_llm_token as _rate_limit_acquire
 from ._security_log import sanitize_for_log
 from .config import LLM_TIMEOUT, get_provider_config
 
@@ -24,15 +25,55 @@ logger = logging.getLogger(__name__)
 # DSML/XML invoke blocks that DeepSeek (and similar reasoning models) emit as
 # raw text when they "think" about tool calls before the structured tool_calls
 # field arrives. Leaking these to the terminal is noisy; strip them from content.
-_DSML_RE = re.compile(r"<\s*\|\s*DSML\s*\|[^>]*>", re.IGNORECASE)
-_XML_INVOKE_RE = re.compile(r"</?\s*invoke[^>]*>", re.IGNORECASE)
+# `</?` covers both opening (<|DSML|name>) and closing (</|DSML|name>) tags.
+_DSML_RE = re.compile(r"</?\s*\|\s*DSML\s*\|[^>]*>", re.IGNORECASE)
+_XML_INVOKE_RE = re.compile(
+    r"</?\s*(invoke|parameter|tool_calls)\b[^>]*>",
+    re.IGNORECASE,
+)
 
 
 def _strip_dsml(text: str) -> str:
-    """Remove DSML and <invoke> tags from LLM content text."""
+    """Remove DSML and <invoke>/<parameter>/<tool_calls> tags from content."""
     text = _DSML_RE.sub("", text)
     text = _XML_INVOKE_RE.sub("", text)
     return text
+
+
+class DsmlStripper:
+    """Stream-safe DSML stripper.
+
+    A naïve per-chunk `_strip_dsml(chunk)` misses tags split across SSE
+    boundaries (e.g. ``<|DSM`` arrives, then ``L|tool_calls>``). This buffers
+    any unclosed ``<…`` tail until the matching ``>`` arrives so the regex
+    sees the full tag.
+    """
+
+    __slots__ = ("_buffer",)
+
+    def __init__(self) -> None:
+        self._buffer = ""
+
+    def feed(self, chunk: str) -> str:
+        """Append a streaming chunk, return safe-to-emit text."""
+        if not chunk:
+            return ""
+        self._buffer += chunk
+        last_lt = self._buffer.rfind("<")
+        if last_lt != -1 and ">" not in self._buffer[last_lt:]:
+            # Hold back the unclosed `<…` tail until its `>` arrives.
+            emit = self._buffer[:last_lt]
+            self._buffer = self._buffer[last_lt:]
+        else:
+            emit = self._buffer
+            self._buffer = ""
+        return _strip_dsml(emit) if emit else ""
+
+    def flush(self) -> str:
+        """Drain the buffer at end-of-stream."""
+        out = _strip_dsml(self._buffer) if self._buffer else ""
+        self._buffer = ""
+        return out
 
 # ─── Retry / Rate-limit config ───
 
@@ -249,6 +290,7 @@ async def stream_chat_with_tools(
 
     for attempt in range(MAX_RETRIES + 1):
         accumulated_content = ""
+        dsml_stripper = DsmlStripper()
         # `reasoning_content` e o canal de "thinking" do DeepSeek-reasoner
         # (e tambem dos `gpt-oss` no Ollama). A API exige que o campo
         # acumulado da resposta seja devolvido na turn seguinte, ou
@@ -262,6 +304,7 @@ async def stream_chat_with_tools(
 
         try:
             client = await _get_shared_llm_client()
+            await _rate_limit_acquire(provider)
             async with client.stream(
                 "POST",
                 f"{base_url}/chat/completions",
@@ -333,13 +376,15 @@ async def stream_chat_with_tools(
                         data = json.loads(data_str)
                         delta = data["choices"][0].get("delta", {})
 
-                        # Content tokens — strip DSML noise before yielding
+                        # Content tokens — strip DSML noise before yielding.
+                        # `dsml_stripper` buffers any unclosed `<…` tail so a
+                        # tag split across SSE chunks is still removed cleanly.
                         content = delta.get("content", "")
                         if content:
-                            content = _strip_dsml(content)
-                            if content:
-                                accumulated_content += content
-                                yield {"type": "content_token", "token": content}
+                            safe = dsml_stripper.feed(content)
+                            if safe:
+                                accumulated_content += safe
+                                yield {"type": "content_token", "token": safe}
 
                         # Thinking tokens (DeepSeek-reasoner). Acumulados
                         # silenciosamente — nao streamamos para o usuario
@@ -379,6 +424,12 @@ async def stream_chat_with_tools(
                     except (KeyError, IndexError) as e:
                         logger.debug(f"Unexpected SSE chunk format: {e} | data: {data_str[:200]}")
                         continue
+
+            # Drain any unclosed `<…` tail held back during streaming.
+            tail = dsml_stripper.flush()
+            if tail:
+                accumulated_content += tail
+                yield {"type": "content_token", "token": tail}
 
             # Success — build final event and return
             reasoning_out = accumulated_reasoning or None

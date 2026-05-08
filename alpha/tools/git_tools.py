@@ -13,6 +13,7 @@ import shlex
 from pathlib import Path
 
 from . import ToolDefinition, ToolSafety, register_tool
+from ._subprocess_helpers import SubprocessTimeoutError, run_subprocess_safe
 from .safe_env import get_safe_env
 from .workspace import AGENT_WORKSPACE, assert_within_workspace
 
@@ -93,33 +94,17 @@ async def _run_git(args: list[str], cwd: str, timeout: int | None = None) -> dic
         timeout = TOOL_TIMEOUTS.get("git", 30)
     cmd = ["git"] + args
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=cwd,
-            env=get_safe_env(),
-        )
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except TimeoutError:
-            proc.kill()
-            await proc.wait()
-            return {"error": f"git excedeu timeout de {timeout}s", "timeout": True}
-        except (asyncio.CancelledError, KeyboardInterrupt):
-            # Ctrl+C durante `git push`/`git fetch` deixaria o processo
-            # rodando ate completar a transferencia. Mata e propaga.
-            proc.kill()
-            await proc.wait()
-            raise
-
-        return {
-            "exit_code": proc.returncode,
-            "stdout": stdout.decode(errors="replace")[:15000],
-            "stderr": stderr.decode(errors="replace")[:3000],
-        }
+        r = await run_subprocess_safe(*cmd, timeout=timeout, cwd=cwd)
+    except SubprocessTimeoutError:
+        return {"error": f"git excedeu timeout de {timeout}s", "timeout": True}
     except Exception as e:
         return {"error": str(e)}
+
+    return {
+        "exit_code": r.returncode,
+        "stdout": r.stdout.decode(errors="replace")[:15000],
+        "stderr": r.stderr.decode(errors="replace")[:3000],
+    }
 
 
 def _find_git_repo(path: str) -> str | None:
