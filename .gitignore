@@ -53,8 +53,15 @@ Thumbs.db
 # Local WIP / unrelated projects
 lab-recorder/
 
-# Internal security/code audits — kept local only
+# Internal security/code audits — kept local only.
+# STATUS.md is here too because it summarizes audit findings (open
+# CRITICOs/ALTOs with file:line references) which become an exploit
+# roadmap in a public repo. SKILLS_AUDIT.md is generated from the local
+# environment and reveals which CLIs are installed on the author's box.
+# USER_GUIDE.md is intentionally NOT ignored — it's the public manual.
 docs/audits/
+docs/STATUS.md
+docs/SKILLS_AUDIT.md
 
 # Backup of .git/ (local snapshot before risky operations)
 .git.backup/
