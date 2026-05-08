@@ -52,8 +52,7 @@ _PROVIDERS = {
         "api_key_env": "DEEPSEEK_API_KEY",
         "model_env": "DEEPSEEK_MODEL",
         "default_model": "deepseek-v4-pro",
-        "supports_vision": True,
-        "vision_format": "anthropic",
+        "supports_vision": False,
     },
     "openai": {
         "base_url": os.getenv("OPENAI_API_BASE_URL", "https://api.openai.com/v1"),
