@@ -245,18 +245,27 @@ def print_tool_result(name: str, result: dict, args: dict | None = None) -> None
             return
 
         # Diff rendering for edits — show what was added vs. removed.
-        if name == "edit_file" and isinstance(args, dict):
+        if name == "edit_file" and isinstance(args, dict) and args.get("old_text"):
             old_text = str(args.get("old_text", ""))
             new_text = str(args.get("new_text", ""))
             path = result.get("path") or args.get("path")
             _render_diff(old_text, new_text, str(path) if path else None)
             return
 
-        if name == "write_file" and isinstance(args, dict):
+        if name == "write_file" and isinstance(args, dict) and args.get("content"):
             new_content = str(args.get("content", ""))
             path = result.get("path") or args.get("path")
             old_content = result.get("_previous_content", "")
             _render_diff(old_content, new_content, str(path) if path else None)
+            return
+
+        # Clean one-line summary for file ops without diff args (parallel batches).
+        if name in ("edit_file", "write_file") and not result.get("error"):
+            path = result.get("path", "")
+            n = result.get("occurrences_found", result.get("replaced", 0))
+            ok = c(C.GREEN, "✓") if not result.get("skipped") else c(C.YELLOW, "⊘")
+            detail = f"{n} occurrence(s)" if n else ""
+            print(f"  {ok} {c(C.CYAN, name)} {c(C.GRAY, str(path))} {c(C.DIM, detail)}".rstrip())
             return
 
         # Show output/content preview
@@ -269,11 +278,17 @@ def print_tool_result(name: str, result: dict, args: dict | None = None) -> None
                 remaining = len(lines) - DISPLAY_MAX_LINES
                 print(f"  {border} {c(C.GRAY, f'... ({remaining} more lines)')}")
         else:
-            # Show as compact JSON
-            preview = json.dumps(result, ensure_ascii=False, default=str)
-            if len(preview) > DISPLAY_LINE_TRUNCATE:
-                preview = preview[:DISPLAY_LINE_TRUNCATE - 3] + "..."
-            print(f"  {border} {c(C.GRAY, preview)}")
+            # Compact one-line summary for results without text output.
+            # Pick the most informative key: path > count > status > first value.
+            short = result.get("path") or str(result.get("count", ""))
+            if not short:
+                keys = [k for k in result if not k.startswith("_")]
+                if keys:
+                    first_val = str(result[keys[0]])
+                    short = first_val[:DISPLAY_LINE_TRUNCATE - 20]
+            if len(str(short)) > DISPLAY_LINE_TRUNCATE - 10:
+                short = str(short)[:DISPLAY_LINE_TRUNCATE - 13] + "..."
+            print(f"  {border} {c(C.GRAY, str(short))}")
     else:
         result_str = str(result)[:DISPLAY_LINE_TRUNCATE]
         print(f"  {border} {result_str}")
@@ -541,6 +556,34 @@ _SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇"
 _FLOWER_FRAMES = ["✻", "✽", "✾", "✿", "❀", "✿", "✾", "✽"]
 
 
+def label_for_tool(name: str) -> str:
+    """Map a tool name to a short phase verb shown in the indicator."""
+    if not name:
+        return "Working"
+    n = name.lower()
+    if n.startswith("mcp__"):
+        return "Calling MCP"
+    if n in {"read_file", "view_file", "read"}:
+        return "Reading"
+    if n in {"glob_files", "search_files", "grep_files", "find_files", "grep"}:
+        return "Searching"
+    if n in {"edit_file", "write_file", "multi_edit", "search_and_replace"}:
+        return "Editing"
+    if n in {"run_shell", "run_command", "shell", "bash"}:
+        return "Running"
+    if n in {"delegate_task", "delegate_parallel"}:
+        return "Delegating"
+    if n in {"present_plan", "todo_write"}:
+        return "Planning"
+    if n in {"web_fetch", "web_search", "http_request", "fetch"}:
+        return "Fetching"
+    if n in {"run_tests", "deploy_check"}:
+        return "Testing"
+    if n in {"query_database", "describe_table"}:
+        return "Querying"
+    return "Working"
+
+
 class ThinkingIndicator:
     """Animated spinner for in-progress async work.
 
@@ -591,8 +634,9 @@ class ThinkingIndicator:
             while self._running:
                 frame = self.frames[i % len(self.frames)]
                 elapsed = time.monotonic() - self._start_time
-                dur = f" ({int(elapsed)}s)" if elapsed >= 1 else ""
-                line = f"\r{c(C.GREEN_NEON + C.BOLD, frame)} {c(C.GREEN_NEON + C.BOLD, self.label + dur)}\033[K"
+                label_part = c(C.GREEN_NEON + C.BOLD, f"{self.label}...")
+                dur_part = c(C.GRAY, f" ({int(elapsed)}s)") if elapsed >= 1 else ""
+                line = f"\r{c(C.GREEN_NEON + C.BOLD, frame)} {label_part}{dur_part}\033[K"
                 sys.stdout.write(line)
                 sys.stdout.flush()
                 i += 1
