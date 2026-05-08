@@ -9,7 +9,7 @@ Total: **53** skills (complete: 22, inactive: 30, skeleton: 0, broken: 1).
 
 | Status | Skill | Body chars | Requires bins | Notes |
 |---|---|---:|---|---|
-| broken | `canvas` | — | — | parse error: Missing YAML frontmatter in /home/freire/Documents/MeusProjetos/Alpha_Code/skills/canvas/SKILL.md |
+| broken | `canvas` | — | — | parse error: Missing YAML frontmatter in skills/canvas/SKILL.md |
 | inactive | `1password` | 1938 | op | missing bins on PATH: op |
 | inactive | `apple-notes` | 1390 | memo | missing bins on PATH: memo |
 | inactive | `apple-reminders` | 2459 | remindctl | missing bins on PATH: remindctl |

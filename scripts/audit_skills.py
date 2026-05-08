@@ -31,7 +31,11 @@ def classify(skill_path: Path) -> tuple[str, str, dict]:
     try:
         skill = load_skill_file(skill_path)
     except Exception as e:
-        return "broken", f"parse error: {e}", {}
+        # Scrub the absolute project root from the error so the audit
+        # report stays portable across machines and doesn't leak the local
+        # username when committed to a public repo.
+        reason = str(e).replace(str(ROOT) + "/", "").replace(str(ROOT), ".")
+        return "broken", f"parse error: {reason}", {}
 
     info = {
         "name": skill.name,

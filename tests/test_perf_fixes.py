@@ -67,15 +67,15 @@ class TestLoopDetectionStillWorks:
     def test_sibling_directories_not_flagged_as_loop(self):
         # Regressao do bug reportado: list_directory em irmaos do mesmo
         # projeto era flagado como loop por causa do prefixo compartilhado
-        # /home/freire/Documents/MeusProjetos/Alpha_Code/.
+        # do caminho do projeto (ex: /home/u/Documents/MyProjects/MyApp).
         recent = [
-            "list_directory:{\"path\": \"/home/freire/Documents/MeusProjetos/Alpha_Code\"}",
-            "list_directory:{\"path\": \"/home/freire/Documents/MeusProjetos/Alpha_Code/alpha\"}",
-            "list_directory:{\"path\": \"/home/freire/Documents/MeusProjetos/Alpha_Code/agents\"}",
-            "list_directory:{\"path\": \"/home/freire/Documents/MeusProjetos/Alpha_Code/tests\"}",
-            "list_directory:{\"path\": \"/home/freire/Documents/MeusProjetos/Alpha_Code/skills\"}",
+            "list_directory:{\"path\": \"/home/u/Documents/MyProjects/MyApp\"}",
+            "list_directory:{\"path\": \"/home/u/Documents/MyProjects/MyApp/alpha\"}",
+            "list_directory:{\"path\": \"/home/u/Documents/MyProjects/MyApp/agents\"}",
+            "list_directory:{\"path\": \"/home/u/Documents/MyProjects/MyApp/tests\"}",
+            "list_directory:{\"path\": \"/home/u/Documents/MyProjects/MyApp/skills\"}",
         ]
-        new_sig = "list_directory:{\"path\": \"/home/freire/Documents/MeusProjetos/Alpha_Code/docs\"}"
+        new_sig = "list_directory:{\"path\": \"/home/u/Documents/MyProjects/MyApp/docs\"}"
         assert _detect_loop([new_sig], recent, []) is None
 
 
