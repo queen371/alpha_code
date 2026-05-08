@@ -1,5 +1,5 @@
 # STATUS DO PROJETO — Alpha Code
-> Ultima atualizacao: 2026-05-08 01:00
+> Ultima atualizacao: 2026-05-08 01:30
 > Atualizado por: Claude Code (status-update)
 
 ---
@@ -7,7 +7,7 @@
 ## Estado Geral: TODOS OS CRITICOS+ALTOS+V2.0 FECHADOS
 
 ### Resumo
-0 CRITICOs e 0 ALTOs ativos. **4 de 6 DEEPs 100% zerados** (BUGS 18/18, LOGIC 9/9, PERF 25/25, e SEC com apenas 2 design decisions abertas). Backlog reduzido a **20 stragglers V1.0/V1.1**: BUGS 0, LOGIC 0, MAINT 15, PERF 0, RES 3, SEC 2. Sprint Opcao B fechou: #018 SEC (verificada — sub-agent destructive blocklist ja cobre browser_click/fill/press/execute_js + git_operation write filtrado por _auto_approve_no_callback) + #025/#071 PERF (`search_files` migrado pra ripgrep com fallback Python — 10-50x mais rapido em projetos grandes). Suite **428/428 verde** (+8 testes em test_search_ripgrep.py).
+0 CRITICOs e 0 ALTOs ativos. **4 de 6 DEEPs 100% zerados** (BUGS 18/18, LOGIC 9/9, PERF 25/25, e SEC com apenas 2 design decisions abertas). Backlog reduzido a **17 stragglers V1.0/V1.1**: BUGS 0, LOGIC 0, MAINT 12, PERF 0, RES 3, SEC 2. Sprint atual fechou: #D007 (sub-agent policy configuravel via FEATURES + env vars `ALPHA_SUBAGENT_POLICY/EXTRA_BLOCK/ALLOW`) + #D006 SIGALRM (verificada — substituido por subprocess validator) + #084 (verificada — AST migration ja feita em code_tools). Suite **441/441 verde** (+13 testes em test_subagent_policy.py).
 
 ---
 
@@ -71,7 +71,7 @@ Nenhuma issue ALTO pendente. Todos os 14 ALTOs originais (V1.1 + DEEPs V2.0) fec
 |------|--------|------|------------------------------------|-----|
 | **DEEP_BUGS** | 18 | **0** ✅ | — | [DEEP_BUGS](audits/current/DEEP_BUGS.md) |
 | **DEEP_LOGIC** | 9 | **0** ✅ | — | [DEEP_LOGIC](audits/current/DEEP_LOGIC.md) |
-| **DEEP_MAINTAINABILITY** | 33 | 15 | refators grandes: #DM001 (split repl), #D001/#D002/#D003/#D004 (subprocess/security/timeout/executor consolidation), #030/#081/#082 (splits composite/browser/delegate); restos pequenos: #DM012/#DM016, #D006-#D008, #084, #088 | [DEEP_MAINTAINABILITY](audits/current/DEEP_MAINTAINABILITY.md) |
+| **DEEP_MAINTAINABILITY** | 36 | 12 | refators grandes: #DM001 (split repl), #D001/#D002/#D003/#D004 (subprocess/security/timeout/executor consolidation), #030/#081/#082 (splits composite/browser/delegate); restos pequenos: #DM012, #DM016, #D008/D089 (idioma), #088 | [DEEP_MAINTAINABILITY](audits/current/DEEP_MAINTAINABILITY.md) |
 | **DEEP_PERFORMANCE** | 25 | **0** ✅ | — | [DEEP_PERFORMANCE](audits/current/DEEP_PERFORMANCE.md) |
 | **DEEP_RESILIENCE** | 30 | 3 | #D008 (rate limits design), #002/#D002 (SIGALRM cross-ref), #008/#D004 (FD leak cross-ref) | [DEEP_RESILIENCE](audits/current/DEEP_RESILIENCE.md) |
 | **DEEP_SECURITY** | 28 | 2 | #036 (upper bound + lockfile), #D014 (plugin manifest signing) | [DEEP_SECURITY](audits/current/DEEP_SECURITY.md) |

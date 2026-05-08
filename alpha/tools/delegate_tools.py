@@ -185,10 +185,22 @@ async def _run_subagent(
     # Also block destructive tools that could bypass approval if no callback.
     # Policy lives in SUBAGENT_DESTRUCTIVE_BLOCKLIST (module level) so tests
     # can validate the surface independently of an actual run.
+    #
+    # #D007 (V1.0): policy + extra_block + allow vem de FEATURES (env-driven).
+    # - "strict" (default): bloqueia destructive em modo no-callback (comportamento antigo)
+    # - "relaxed": confia no sub-agent, so anti-recursao
+    # - extra_block: usuario pode fortalecer
+    # - allow: usuario pode aliviar (sobrepoe blocklist)
     _blocked = {"delegate_task", "delegate_parallel"}
     all_tools = get_openai_tools()
-    if parent_approval_callback is None:
+    policy = feat.get("subagent_policy", "strict")
+    if parent_approval_callback is None and policy != "relaxed":
         _blocked = _blocked | SUBAGENT_DESTRUCTIVE_BLOCKLIST
+    _blocked = _blocked | feat.get("subagent_extra_block", frozenset())
+    _blocked = _blocked - feat.get("subagent_allow", frozenset())
+    # `delegate_*` continua bloqueado mesmo se usuario incluir em
+    # subagent_allow — anti-recursao e invariante, nao policy.
+    _blocked = _blocked | {"delegate_task", "delegate_parallel"}
     tools = [t for t in all_tools if t["function"]["name"] not in _blocked]
 
     if tools_filter:

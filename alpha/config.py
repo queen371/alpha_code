@@ -187,6 +187,27 @@ FEATURES: dict = {
     # controla concorrencia, nao total. Sem cap, o modelo pode submeter
     # array de 100 tasks * 15 iteracoes = 1500 chamadas LLM silenciosas.
     "max_delegate_total_tasks": 10,
+    # #D007 (V1.0): politica de bloqueio do sub-agent. "strict" (default)
+    # bloqueia tools destrutivas quando nao ha approval callback do parent —
+    # comportamento de antes. "relaxed" deixa o sub-agent usar tudo exceto
+    # delegate_* (anti-recursao). Antes essa logica era hardcoded em
+    # `delegate_tools._run_subagent` sem maneira de o usuario ajustar
+    # — daemon mode / scripts batch precisavam custom-patch o source.
+    "subagent_policy": os.environ.get("ALPHA_SUBAGENT_POLICY", "strict"),
+    # Tools extra a bloquear no sub-agent (alem de SUBAGENT_DESTRUCTIVE_BLOCKLIST).
+    # Comma-separated. Ex: ALPHA_SUBAGENT_EXTRA_BLOCK=write_file,edit_file
+    "subagent_extra_block": frozenset(
+        t.strip()
+        for t in os.environ.get("ALPHA_SUBAGENT_EXTRA_BLOCK", "").split(",")
+        if t.strip()
+    ),
+    # Tools que o sub-agent pode usar mesmo estando na blocklist default.
+    # Comma-separated. Ex: ALPHA_SUBAGENT_ALLOW=execute_shell,http_request
+    "subagent_allow": frozenset(
+        t.strip()
+        for t in os.environ.get("ALPHA_SUBAGENT_ALLOW", "").split(",")
+        if t.strip()
+    ),
 }
 
 
