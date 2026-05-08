@@ -212,6 +212,23 @@ FEATURES: dict = {
 
 
 # ─── Tool Timeouts (seconds) ───
+#
+# #D003 (V1.0 MAINT): tres camadas de timeout, todas centralizadas aqui:
+#
+# 1. `TOOL_TIMEOUTS` (per-category default) — usado quando o caller nao
+#    especifica `timeout=` na chamada da tool. Categoria vem do registry.
+#
+# 2. `TOOL_TIMEOUT_CAPS` (per-category hard cap) — limite maximo mesmo que
+#    o caller peca timeout maior. Aplicado via `min(timeout, cap)` nas
+#    tools. Antes era hardcoded literal em 4 modulos divergentes
+#    (shell_tools=300, code_tools=60, network_tools=60, pipeline_tools=120).
+#
+# 3. `TOOL_EXECUTION_TIMEOUT` / `SLOW_TOOL_TIMEOUT` (executor-level) — para
+#    tools que nao tem categoria conhecida (composite, agent, etc.) ou
+#    para o gate global do executor. Antes estavam em `executor.py`.
+#
+# Ajustar timeout = mudar UM lugar.
+
 TOOL_TIMEOUTS: dict = {
     "shell": 180,
     "code": 60,
@@ -221,6 +238,22 @@ TOOL_TIMEOUTS: dict = {
     "database": 30,
     "browser": 180,
 }
+
+TOOL_TIMEOUT_CAPS: dict = {
+    "shell": 300,
+    "code": 60,
+    "network": 60,
+    "pipeline": 120,
+    "database": 60,
+    "browser": 300,
+    "git": 60,
+}
+
+# Executor-level timeouts (tools sem categoria, gate global). Importados
+# por `executor.py` — manter compatibilidade com tests que ainda lem do
+# executor (ele re-exporta).
+TOOL_EXECUTION_TIMEOUT = 120  # default para tools sem categoria
+SLOW_TOOL_TIMEOUT = 300       # delegate_*, run_tests, deploy_check, etc.
 
 # ─── Browser tool policies ───
 # Comma-separated env vars. By default, an empty allowlist still permits

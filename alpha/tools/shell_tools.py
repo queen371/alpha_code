@@ -134,8 +134,9 @@ async def _execute_shell(command: str, cwd: str = None, timeout: int | None = No
     else:
         cwd = str(AGENT_WORKSPACE)
 
-    # Cap timeout
-    timeout = min(timeout, 300)
+    # Cap timeout (#D003: fonte unica em config.TOOL_TIMEOUT_CAPS)
+    from ..config import TOOL_TIMEOUT_CAPS
+    timeout = min(timeout, TOOL_TIMEOUT_CAPS.get("shell", 300))
 
     try:
         try:

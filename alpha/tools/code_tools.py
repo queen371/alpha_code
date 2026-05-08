@@ -112,10 +112,10 @@ def _format_block(snippet: str) -> str:
 
 async def _execute_python(code: str, timeout: int | None = None) -> dict:
     """Execute Python code in a subprocess with timeout."""
-    from ..config import TOOL_TIMEOUTS
+    from ..config import TOOL_TIMEOUT_CAPS, TOOL_TIMEOUTS
     if timeout is None:
         timeout = TOOL_TIMEOUTS.get("code", 60)
-    timeout = min(timeout, 60)  # Hard cap
+    timeout = min(timeout, TOOL_TIMEOUT_CAPS.get("code", 60))
 
     # Local execution with static import blocklist
     safety_error = _validate_code_safety(code)

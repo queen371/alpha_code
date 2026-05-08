@@ -111,25 +111,47 @@ def _parse_segment(segment: str) -> tuple[list[str], dict[str, str]]:
 
 
 def _open_redirect_files(redirects: dict[str, str]) -> dict:
-    """Abre file handles para redirects. Valida contra workspace."""
-    handles = {}
-    for key, target in redirects.items():
-        target_path = Path(target).expanduser().resolve()
-        try:
-            target_path.relative_to(AGENT_WORKSPACE)
-        except ValueError:
-            raise ValueError(f"Redirect '{target}' fora do workspace ({AGENT_WORKSPACE})")
+    """Abre file handles para redirects. Valida contra workspace.
 
-        if key == "stdout":
-            handles["stdout"] = open(target_path, "w")
-        elif key == "stdout_append":
-            handles["stdout"] = open(target_path, "a")
-        elif key == "stderr":
-            handles["stderr"] = open(target_path, "w")
-        elif key == "stderr_append":
-            handles["stderr"] = open(target_path, "a")
-        elif key == "stdin":
-            handles["stdin"] = open(target_path)
+    #D004/#008 (V1.1 RES): se a validacao de workspace falhar no meio do
+    loop (e.g. `cmd > ok.txt 2> /etc/passwd` onde a primeira passa e a
+    segunda nao), os handles ja abertos vazavam — `raise ValueError`
+    deixava o dict orfa e o caller perdia a chance de fechar. Agora todo
+    o open acontece num try/except que fecha handles ja abertos antes
+    de re-raise, mantendo o invariante "ou retorna tudo aberto, ou nao
+    deixa fd vazado".
+    """
+    handles: dict = {}
+    try:
+        for key, target in redirects.items():
+            target_path = Path(target).expanduser().resolve()
+            try:
+                target_path.relative_to(AGENT_WORKSPACE)
+            except ValueError:
+                raise ValueError(
+                    f"Redirect '{target}' fora do workspace ({AGENT_WORKSPACE})"
+                )
+
+            if key == "stdout":
+                handles["stdout"] = open(target_path, "w")
+            elif key == "stdout_append":
+                handles["stdout"] = open(target_path, "a")
+            elif key == "stderr":
+                handles["stderr"] = open(target_path, "w")
+            elif key == "stderr_append":
+                handles["stderr"] = open(target_path, "a")
+            elif key == "stdin":
+                handles["stdin"] = open(target_path)
+    except Exception:
+        # Cleanup parcial: fecha tudo o que conseguimos abrir antes do erro.
+        # Engole erros de close (handle ja invalido / disco quebrado) — o
+        # erro original e o que o caller precisa ver.
+        for fh in handles.values():
+            try:
+                fh.close()
+            except Exception:
+                pass
+        raise
     return handles
 
 
@@ -261,7 +283,8 @@ async def _execute_pipeline(pipeline: str, cwd: str = None, timeout: int | None 
     else:
         cwd = str(AGENT_WORKSPACE)
 
-    timeout = min(timeout, 120)
+    from ..config import TOOL_TIMEOUT_CAPS
+    timeout = min(timeout, TOOL_TIMEOUT_CAPS.get("pipeline", 120))
     env = get_safe_env()
 
     try:

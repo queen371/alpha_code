@@ -11,12 +11,18 @@ import logging
 from collections.abc import AsyncGenerator, Callable
 
 from . import hooks
-from .config import TOOL_RESULT_MAX_CHARS
+from .config import (
+    SLOW_TOOL_TIMEOUT as _CFG_SLOW_TOOL_TIMEOUT,
+    TOOL_EXECUTION_TIMEOUT as _CFG_TOOL_EXECUTION_TIMEOUT,
+    TOOL_RESULT_MAX_CHARS,
+)
 
 logger = logging.getLogger(__name__)
 
-TOOL_EXECUTION_TIMEOUT = 120  # seconds per individual tool
-_SLOW_TOOL_TIMEOUT = 300  # 5 minutes for investigation pipelines
+# #D003 (V1.0): re-export por retro-compat. O codigo legacy (composite_tools,
+# tests) importava daqui. Fonte unica de verdade vive em `alpha.config`.
+TOOL_EXECUTION_TIMEOUT = _CFG_TOOL_EXECUTION_TIMEOUT
+_SLOW_TOOL_TIMEOUT = _CFG_SLOW_TOOL_TIMEOUT
 _SLOW_TOOLS = frozenset({
     "investigate_person", "deploy_check", "run_tests",
     "delegate_task", "delegate_parallel",

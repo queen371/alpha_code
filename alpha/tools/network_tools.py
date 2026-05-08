@@ -104,7 +104,8 @@ async def _http_request(
     if url_error:
         return {"error": url_error, "blocked": True}
 
-    timeout = min(timeout, 60)
+    from ..config import TOOL_TIMEOUT_CAPS
+    timeout = min(timeout, TOOL_TIMEOUT_CAPS.get("network", 60))
 
     try:
         import aiohttp  # noqa: F401 — usado por aiohttp.ClientTimeout abaixo
