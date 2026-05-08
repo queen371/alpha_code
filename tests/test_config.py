@@ -48,10 +48,10 @@ class TestProviderVisionFlag:
         cfg = get_provider_config("anthropic")
         assert cfg["supports_vision"] is True
 
-    def test_deepseek_does_not_support_vision(self, monkeypatch):
+    def test_deepseek_supports_vision(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test")
         cfg = get_provider_config("deepseek")
-        assert cfg["supports_vision"] is False
+        assert cfg["supports_vision"] is True
 
     def test_grok_does_not_support_vision(self, monkeypatch):
         monkeypatch.setenv("GROK_API_KEY", "test")
