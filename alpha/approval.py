@@ -95,7 +95,13 @@ SAFE_SHELL_COMMANDS = frozenset(
         "git",
         # Environment
         "env", "printenv", "which", "type", "echo", "printf",
-        "touch", "mkdir", "cp", "mv", "basename", "dirname",
+        # `touch` / `mkdir` create empty artefacts — low risk, kept here.
+        # `cp` / `mv` were removed because both can move data ACROSS the
+        # workspace boundary without prompt (e.g. `cp /etc/passwd /tmp/x`):
+        # auto-approval does not validate the *source* path. A user who
+        # actually relies on cp/mv should add an explicit allow rule in
+        # `.alpha/settings.json` — see the example file. (#audit-cp-exfil)
+        "touch", "mkdir", "basename", "dirname",
         "realpath", "readlink",
     }
 )

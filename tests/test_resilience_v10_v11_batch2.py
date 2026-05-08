@@ -40,9 +40,9 @@ class TestShutdownLoopDetection:
     def test_uses_get_running_loop(self):
         import inspect
 
-        import main
+        from alpha.cli import lifecycle
 
-        src = inspect.getsource(main._shutdown_browser_session)
+        src = inspect.getsource(lifecycle._shutdown_browser_session)
         # Deve detectar loop ativo via get_running_loop e cair em loop
         # dedicado em vez de quebrar com asyncio.run.
         assert "get_running_loop" in src
@@ -51,9 +51,9 @@ class TestShutdownLoopDetection:
     def test_logs_real_errors_instead_of_pass(self):
         import inspect
 
-        import main
+        from alpha.cli import lifecycle
 
-        src = inspect.getsource(main._shutdown_browser_session)
+        src = inspect.getsource(lifecycle._shutdown_browser_session)
         # Antes era `except: pass` — agora distingue ImportError silencioso
         # do erro real que merece print pra stderr.
         assert "except ImportError" in src
@@ -160,16 +160,16 @@ class TestListenerCleanup:
 
 class TestSigtermHandler:
     def test_install_function_exists(self):
-        import main
+        from alpha.cli import lifecycle
 
-        assert hasattr(main, "_install_sigterm_handler")
+        assert hasattr(lifecycle, "_install_sigterm_handler")
 
     def test_handler_calls_sys_exit(self):
         import inspect
 
-        import main
+        from alpha.cli import lifecycle
 
-        src = inspect.getsource(main._install_sigterm_handler)
+        src = inspect.getsource(lifecycle._install_sigterm_handler)
         # Handler precisa chamar sys.exit para disparar atexit hooks.
         # Usar `os._exit` pularia atexit — bug conhecido.
         assert "sys.exit" in src

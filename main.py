@@ -10,36 +10,27 @@ Usage:
 
 import argparse
 import asyncio
-import atexit
-import json
-import logging
 import os
 import shutil
 import sys
 import textwrap
 from pathlib import Path
 
-from alpha.agents import AgentScope, get_agent, list_agents, load_all_agents
+from alpha.agents import get_agent
 from alpha.attachments import build_user_content
 from alpha.config import (
     DEFAULT_PROVIDER,
     get_available_providers,
     get_provider_config,
-    load_system_prompt,
 )
 from alpha import hooks
-from alpha.repl_input import cleanup_temp_images, read_input
-from alpha.mcp import (
-    list_active_servers as list_mcp_servers,
-    load_mcp_servers,
-    shutdown_mcp_servers,
-)
-from alpha.skills import get_skill, inject_skill_index, list_skills, load_all_skills
+from alpha.repl_input import read_input
+from alpha.mcp import list_active_servers as list_mcp_servers
+from alpha.skills import get_skill, list_skills
 from alpha.display import (
     C,
     ThinkingIndicator,
     c,
-    print_approval_request,
     print_banner,
     print_context_compressed,
     print_error,
@@ -59,183 +50,17 @@ from alpha.history import (
     load_session_summary,
     save_session,
 )
+from alpha.cli.lifecycle import install_lifecycle_hooks
+from alpha.cli.setup import (
+    approval_callback as _approval_callback,
+    build_system_prompt as _build_system_prompt,
+    get_tools_for_agent as _get_tools_for_agent,
+    list_agents,
+    pick_provider_interactive as _pick_provider_interactive,
+    resolve_active_agent as _resolve_active_agent,
+)
 
-
-def _build_system_prompt(agent: AgentScope | None = None) -> str:
-    """Load base system prompt, apply agent extras, inject (filtered) skill index,
-    and append per-project context from ALPHA.md (if found)."""
-    from alpha.project_context import inject_project_context, load_project_context
-
-    load_all_skills()
-    base = load_system_prompt()
-    if agent is not None and agent.system_prompt_extra:
-        base = f"{base}\n\n# AGENT PROFILE: {agent.name}\n{agent.system_prompt_extra}"
-    skill_filter = (
-        agent.filter_skills
-        if agent is not None and (agent.skills_allow or agent.skills_deny)
-        else None
-    )
-    base = inject_skill_index(base, name_filter=skill_filter)
-    return inject_project_context(base, load_project_context())
-
-
-def _get_tools_for_agent(agent: AgentScope | None):
-    """Return (get_tool_fn, openai_tools_list) filtered by the agent's tool scope."""
-    try:
-        from alpha.tools import get_openai_tools, get_tool, load_all_tools
-
-        load_all_tools()
-        # MCP tools register into the same registry; load them after the
-        # built-in tools so a misbehaving MCP server can't shadow native ones.
-        try:
-            load_mcp_servers()
-        except Exception as e:
-            logging.getLogger(__name__).warning("MCP load failed: %s", e)
-        if agent is not None and (agent.tools_allow or agent.tools_deny):
-            tools = get_openai_tools(name_filter=agent.filter_tools)
-        else:
-            tools = get_openai_tools()
-        return get_tool, tools
-    except ImportError:
-        return None, []
-
-
-def _pick_provider_interactive(default: str) -> str:
-    """Prompt user to pick a provider at startup. Falls back to `default` on Enter/EOF."""
-    providers = get_available_providers()
-    print(c(C.CYAN + C.BOLD, "\nSelect a model / provider:"))
-    print_providers_list(providers, default=default, numbered=True)
-
-    while True:
-        try:
-            choice = input(c(C.GRAY, f"\n  Choice [1-{len(providers)}, Enter={default}]: ")).strip()
-        except (KeyboardInterrupt, EOFError):
-            print()
-            return default
-        if not choice:
-            return default
-
-        pick = None
-        if choice.isdigit():
-            idx = int(choice) - 1
-            if 0 <= idx < len(providers):
-                pick = providers[idx]
-        else:
-            pick = next((p for p in providers if p["id"] == choice), None)
-
-        if pick is None:
-            print(c(C.RED, "  Invalid choice."))
-            continue
-        if not pick["available"]:
-            print(c(C.RED, f"  {pick['id']} not available — pick another."))
-            continue
-        return pick["id"]
-
-
-def _resolve_active_agent() -> AgentScope | None:
-    """Pick the active agent from ALPHA_AGENT env, else a 'default' profile if it exists."""
-    load_all_agents()
-    explicit = os.getenv("ALPHA_AGENT", "").strip()
-    if explicit:
-        agent = get_agent(explicit)
-        if agent is None:
-            print_error(f"Agent '{explicit}' not found (ALPHA_AGENT). Using no profile.")
-        return agent
-    return get_agent("default")
-
-
-def _approval_callback(tool_name: str, args: dict) -> bool:
-    """Synchronous approval callback for the REPL."""
-    return print_approval_request(tool_name, args)
-
-
-def _shutdown_browser_session():
-    """atexit hook: close any persistent browser session.
-
-    `asyncio.run` falha com RuntimeError se ja existe um loop rodando
-    (raro em atexit, mas acontece em testes / embedding). Quando isso
-    ocorre, usamos um loop dedicado para o shutdown e logamos qualquer
-    erro real ao inves de engolir tudo (#055).
-    """
-    try:
-        from alpha.tools.browser_session import shutdown_browser
-
-        try:
-            asyncio.get_running_loop()
-            # Loop ativo (raro em atexit) — cria um separado para nao
-            # interferir. Se nao existir browser aberto, e no-op rapido.
-            new_loop = asyncio.new_event_loop()
-            try:
-                new_loop.run_until_complete(shutdown_browser())
-            finally:
-                new_loop.close()
-        except RuntimeError:
-            # Sem loop ativo (caminho normal em atexit).
-            asyncio.run(shutdown_browser())
-    except ImportError:
-        pass  # Playwright nao instalado, sem session pra fechar
-    except Exception as e:
-        # Logar para diagnostico — antes era engolido em `except: pass`.
-        # Usar print ao inves de logger porque atexit roda apos shutdown
-        # do logging em alguns paths.
-        try:
-            print(f"shutdown_browser_session: {type(e).__name__}: {e}",
-                  file=sys.stderr)
-        except Exception:
-            pass
-
-
-def _shutdown_mcp_servers():
-    """atexit hook: terminate any spawned MCP server subprocesses."""
-    try:
-        shutdown_mcp_servers()
-    except Exception:
-        pass
-
-
-def _fire_on_stop():
-    """atexit hook: fire user-defined on_stop hooks."""
-    try:
-        hooks.fire("on_stop", workspace=os.getcwd())
-    except Exception:
-        pass
-
-
-atexit.register(_fire_on_stop)
-atexit.register(_shutdown_browser_session)
-atexit.register(_shutdown_mcp_servers)
-atexit.register(cleanup_temp_images)
-
-
-def _install_sigterm_handler():
-    """Trigger atexit cleanup on SIGTERM (#067).
-
-    Sem isto, `kill <pid>` (default SIGTERM, ex: container shutdown,
-    systemd timeout) mata o processo SEM rodar atexit hooks: browser
-    runtime fica zumbi, sessao nao salva, MCP servers ficam orfaos.
-    `signal.signal(SIGTERM, ...)` faz o handler sair via `sys.exit`,
-    o que dispara os atexit. Em SO sem SIGTERM (Windows nativo) e
-    no-op silencioso.
-    """
-    import signal as _signal
-    if not hasattr(_signal, "SIGTERM"):
-        return
-
-    def _on_sigterm(signum, frame):
-        try:
-            print("\n[ALPHA] SIGTERM received — running cleanup", file=sys.stderr)
-        except Exception:
-            pass
-        sys.exit(143)  # 128 + SIGTERM(15) — convencao POSIX
-
-    try:
-        _signal.signal(_signal.SIGTERM, _on_sigterm)
-    except (ValueError, OSError):
-        # Em threads non-main signal.signal levanta — ok ignorar.
-        pass
-
-
-_install_sigterm_handler()
+install_lifecycle_hooks()
 
 
 async def _run_once(messages, user_message, provider, temperature, get_tool_fn, tools, workspace=None):

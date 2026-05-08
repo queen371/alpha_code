@@ -23,12 +23,18 @@ from ..executor import (
     TOOL_EXECUTION_TIMEOUT,
     _SLOW_TOOL_TIMEOUT,
     _SLOW_TOOLS,
+    _annotate_error,
 )
 from . import ToolDefinition, ToolSafety, get_tool, register_tool
 from .file_tools import _validate_path_no_symlink
 from .workspace import AGENT_WORKSPACE
 
 logger = logging.getLogger(__name__)
+
+
+def _violation(msg: str) -> dict:
+    """Workspace-violation result with the executor's standard error invariant."""
+    return _annotate_error({"error": msg, "workspace_violation": True}, "violation")
 
 
 async def _run_tool(name: str, *, timeout: float | None = None, **kwargs) -> dict:
@@ -46,10 +52,17 @@ async def _run_tool(name: str, *, timeout: float | None = None, **kwargs) -> dic
     (workspace, command allowlist, schema), mas nao re-prompto. Nao chame
     `_run_tool` com tool destrutiva sem garantir que a composite externa
     seja DESTRUCTIVE — caso contrario o gate fica opaco para o usuario.
+
+    Erros desta funcao seguem o invariante `{ok: false, category, ...}` do
+    executor (via `_annotate_error`) — antes retornavam `{"error": str}`
+    cru, fazendo o modelo aprender N variantes de "falhou".
     """
     tool_def = get_tool(name)
     if not tool_def:
-        return {"error": f"Tool '{name}' não encontrada no registry"}
+        return _annotate_error(
+            {"error": f"Tool '{name}' não encontrada no registry"},
+            "unknown_tool",
+        )
 
     if timeout is None:
         timeout = _SLOW_TOOL_TIMEOUT if name in _SLOW_TOOLS else TOOL_EXECUTION_TIMEOUT
@@ -57,12 +70,18 @@ async def _run_tool(name: str, *, timeout: float | None = None, **kwargs) -> dic
     try:
         return await asyncio.wait_for(tool_def.executor(**kwargs), timeout=timeout)
     except (TimeoutError, asyncio.TimeoutError):
-        return {
-            "error": f"Tool '{name}' excedeu timeout de {timeout}s",
-            "timeout": True,
-        }
+        return _annotate_error(
+            {
+                "error": f"Tool '{name}' excedeu timeout de {timeout}s",
+                "timeout": True,
+            },
+            "timeout",
+        )
     except Exception as e:
-        return {"error": f"Erro ao executar {name}: {e}"}
+        return _annotate_error(
+            {"error": f"Erro ao executar {name}: {e}"},
+            "runtime",
+        )
 
 
 async def _project_overview(path: str = None) -> dict:
@@ -73,7 +92,7 @@ async def _project_overview(path: str = None) -> dict:
     try:
         target_path.relative_to(AGENT_WORKSPACE)
     except ValueError:
-        return {"error": f"Path fora do workspace permitido ({AGENT_WORKSPACE})"}
+        return _violation(f"Path fora do workspace permitido ({AGENT_WORKSPACE})")
 
     results = {}
 
@@ -143,7 +162,7 @@ async def _run_tests(
     try:
         target_path.relative_to(AGENT_WORKSPACE)
     except ValueError:
-        return {"error": f"Path fora do workspace permitido ({AGENT_WORKSPACE})"}
+        return _violation(f"Path fora do workspace permitido ({AGENT_WORKSPACE})")
 
     # Auto-detect framework
     if framework == "auto":
@@ -188,7 +207,10 @@ async def _run_tests(
         if pattern:
             cmd += f" -run '{pattern}'"
     else:
-        return {"error": f"Framework '{framework}' não suportado. Use: pytest, npm, cargo, go"}
+        return _annotate_error(
+            {"error": f"Framework '{framework}' não suportado. Use: pytest, npm, cargo, go"},
+            "runtime",
+        )
 
     # Execute via shell tool
     result = await _run_tool("execute_shell", command=cmd, cwd=str(target_path), timeout=120)
@@ -211,7 +233,7 @@ async def _search_and_replace(
     try:
         target_path.relative_to(AGENT_WORKSPACE)
     except ValueError:
-        return {"error": f"Path fora do workspace permitido ({AGENT_WORKSPACE})"}
+        return _violation(f"Path fora do workspace permitido ({AGENT_WORKSPACE})")
 
     # Find files with matches
     search_result = await _run_tool("search_files", path=str(target_path), pattern=re.escape(search))
@@ -303,7 +325,7 @@ async def _deploy_check(path: str = None) -> dict:
     try:
         target_path.relative_to(AGENT_WORKSPACE)
     except ValueError:
-        return {"error": f"Path fora do workspace permitido ({AGENT_WORKSPACE})"}
+        return _violation(f"Path fora do workspace permitido ({AGENT_WORKSPACE})")
 
     checks = {}
 

@@ -2,8 +2,20 @@
 
 This file is auto-loaded into Alpha's system prompt when running inside
 this repo (or any subdirectory). It tells Alpha how to behave **here**
-specifically. Stable, project-level guidance only — runtime state lives
-in `docs/STATUS.md`.
+specifically.
+
+**Scope of each doc** (don't duplicate across them):
+
+- `ALPHA.md` (this file) — directives for Alpha at runtime: house rules,
+  do's and don'ts, what's out of scope.
+- `CLAUDE.md` — architecture orientation for code-aware agents (module
+  responsibilities, dispatch, loop detection internals).
+- `docs/USER_GUIDE.md` — end-user docs (REPL, settings, troubleshooting).
+- `docs/STATUS.md` — running sprint state (open issues, recent fixes).
+- `README.md` — public-facing intro.
+
+Stable, project-level guidance only — runtime state lives in
+`docs/STATUS.md`.
 
 ---
 

@@ -144,6 +144,16 @@ Resolution order, first match wins:
 }
 ```
 
+> **Note on `cp` and `mv`**: these used to be auto-approved by default,
+> but the auto-approve path doesn't validate the source path — so the
+> agent could `cp /etc/passwd /tmp/leak` without a prompt. They were
+> removed from the built-in safe list. If you actually rely on them,
+> add an `allow` rule:
+>
+> ```json
+> "allow": ["execute_shell:^(cp|mv) "]
+> ```
+
 Rule syntax:
 
 - `tool` — match any args.
