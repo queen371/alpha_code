@@ -1,6 +1,6 @@
 [project]
 name = "alpha-code"
-version = "1.0.0"
+version = "1.1.0"
 description = "Alpha Code — Standalone terminal agent"
 requires-python = ">=3.11"
 # DEEP_SECURITY #036: upper bounds em todas as deps. Sem cap, `pip install -U`
