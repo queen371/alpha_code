@@ -27,28 +27,71 @@ VALID_PACKAGE_RE = re.compile(
 
 URL_PREFIXES = ("http://", "https://", "git+", "svn+", "ftp://", "/", "\\")
 
-# AST-based blocklists (#D018-PERF + #027/#075/#084 V1.1):
+# AST-based blocklists (#D018-PERF + #027/#075/#084 V1.1 + #009 V1.2):
 # AST walk linear substituiu a busca regex MULTILINE (175K tentativas no
 # pior caso para 5KB de codigo) e tambem elimina falsos positivos como
 # `\bopen\s*\(.*(w|a|x)` que casava em `open("read.txt")`. A regex legacy
 # foi removida — qualquer extensao do blocklist deve adicionar entradas
 # em _BLOCKED_MODULES / _BLOCKED_CALL_NAMES / _BLOCKED_NAME_TOKENS abaixo.
+#
+# AUDIT V1.2 #009 (RCE crítica corrigida): a tabela anterior listava `os`
+# e `subprocess` mas NÃO os módulos *low-level* que esses dois envelopam
+# em CPython — `posix`, `nt`, `_posixsubprocess`, `_winapi`. Como a tool
+# está em AUTO_APPROVE_TOOLS, `import posix; posix.system("...")` virava
+# RCE sem prompt. Esta tabela agora cobre toda a superfície de OS-level
+# access que o CPython expõe pra Python puro.
 _BLOCKED_MODULES = frozenset({
-    "os", "subprocess", "shutil", "sys", "importlib", "ctypes", "signal",
-    "pathlib", "socket", "pty", "code", "multiprocessing", "webbrowser",
-    "http", "urllib",
-    "httpx", "requests", "aiohttp",
+    # User-facing OS / process / FS modules.
+    "os", "subprocess", "shutil", "sys", "importlib", "ctypes", "_ctypes",
+    "signal", "pathlib", "code", "multiprocessing", "webbrowser",
+    # Low-level OS interfaces — CPython implementation detail of `os` and
+    # `subprocess`. Same capabilities, different name (#009 V1.2).
+    "posix", "nt", "_posixsubprocess", "_winapi", "msvcrt",
+    # Memory / file-descriptor primitives.
+    "mmap", "fcntl", "termios", "tty", "pty", "resource", "select",
+    # Threading / scheduling that can spawn workers.
+    "_thread", "threading", "concurrent", "sched",
+    # Networking — direct + transitive through deps.
+    "socket", "_socket", "ssl", "asyncore", "asynchat",
+    "http", "urllib", "ftplib", "smtplib", "poplib", "imaplib",
+    "telnetlib", "xmlrpc",
+    "httpx", "requests", "aiohttp", "urllib3",
     "duckduckgo_search", "ddgs", "dotenv",
-    "pickle", "marshal", "runpy", "inspect", "gc", "platform", "dis",
+    # Serialization that executes arbitrary code on load.
+    "pickle", "_pickle", "shelve", "marshal", "dill", "cloudpickle",
+    # Reflection / dynamic loading.
+    "runpy", "inspect", "gc", "platform", "dis", "linecache",
+    "site", "sysconfig", "modulefinder",
+    # Direct access to the builtins namespace defeats the AST guards.
+    "builtins", "__builtin__",
+    # Low-level user/group/auth lookups.
+    "pwd", "grp", "spwd", "crypt", "syslog", "nis",
 })
 
 _BLOCKED_CALL_NAMES = frozenset({
     "__import__", "eval", "exec", "compile", "breakpoint",
-    "globals", "getattr", "vars", "chr",
+    "globals", "locals", "getattr", "setattr", "delattr",
+    "vars", "chr", "input",
 })
 
+# Attribute / name access tokens. These names are dangerous either as
+# dotted-attr (`x.__subclasses__`) or as bare Name nodes — both shapes
+# are caught by the validator below.
 _BLOCKED_NAME_TOKENS = frozenset({
     "__loader__", "__builtins__", "__subclasses__",
+    # __getattribute__ / __getattr__ / __setattr__ allow indirect attribute
+    # access that would otherwise be statically visible to the validator.
+    # Block them as defense-in-depth even though `__subclasses__` already
+    # closes the most common gadget chain (#012 V1.2).
+    "__getattribute__", "__getattr__",
+    "__setattr__", "__delattr__",
+    # `()` chain to enumerate classes used to need __subclasses__, but a
+    # well-known alternative is `__init_subclass__.__self_class__` — block
+    # the whole metaclass-traversal cluster.
+    "__init_subclass__", "__build_class__",
+    # Code-object access — could let a determined caller construct a
+    # function with a bytecode payload.
+    "__code__", "__closure__", "__globals__",
 })
 
 _OPEN_WRITE_MODES = frozenset({"w", "wb", "a", "ab", "x", "xb", "w+", "r+", "rb+"})
@@ -102,8 +145,11 @@ def _validate_code_safety(code: str) -> str | None:
 def _format_block(snippet: str) -> str:
     return (
         f"Código bloqueado por segurança: '{snippet[:60]}' não é permitido. "
-        f"Módulos como os, subprocess, shutil, sys, ctypes são bloqueados. "
-        f"Use as ferramentas do agente (execute_shell, write_file) para operações de sistema."
+        f"Acesso a módulos de OS (os, subprocess, posix, _posixsubprocess, "
+        f"ctypes, mmap, fcntl, etc.) e a primitivas de reflection "
+        f"(__getattribute__, __subclasses__, __code__) é bloqueado. "
+        f"Use as ferramentas do agente (execute_shell, write_file) "
+        f"para operações de sistema."
     )
 
 
