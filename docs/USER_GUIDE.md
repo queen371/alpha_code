@@ -80,6 +80,7 @@ Type these directly at the prompt. They don't go to the LLM.
 | `/agents` / `/agent` | List or switch named agent profiles. |
 | `/image` | Attach an image to the next message (Ctrl+V also works). |
 | `/<skill-name>` | Invoke a skill directly. The skill's instructions are inlined into the next message. Optional args follow the name: `/skill-creator make a deploy skill`. |
+| `/init` | Analyze the current project and draft an `ALPHA.md` in the working directory. Pass `/init --force` to overwrite an existing one. |
 | `/exit` | Quit. |
 
 ---
@@ -214,7 +215,56 @@ default. Add an `allow` rule above to auto-approve specific ones.
 
 ---
 
-## 6. Skills — creating, sharing, hiding
+## 6. Per-project context (`ALPHA.md`)
+
+Drop an `ALPHA.md` at your project root and Alpha auto-injects it into the
+system prompt at startup. Use it to teach Alpha project-specific
+conventions, layout, and gotchas — the equivalent of the `CLAUDE.md` you
+might already have for Claude Code, but read by Alpha exclusively.
+
+```markdown
+# ALPHA.md
+
+## House rules
+- Python 3.11+, type hints on new code.
+- Tests live in tests/, run with pytest.
+
+## Status
+Active sprint state lives in docs/STATUS.md.
+```
+
+### How resolution works
+
+- Alpha walks **up** from the current directory until it finds an
+  `ALPHA.md` (same as how git finds `.git`). First match wins.
+- File is capped at **16 KB**; larger files are truncated with a notice
+  so the agent knows context is missing.
+- Alpha **only** reads `ALPHA.md` — not `CLAUDE.md` or `AGENTS.md` —
+  because those files are written for a different agent's identity.
+- The banner shows what got loaded:
+  ```
+  → Project context: ALPHA.md (2.9 KB)
+  ```
+
+### Opt-out
+
+Set `ALPHA_NO_PROJECT_CONTEXT=1` to skip the lookup. Useful when
+debugging prompt issues or running in CI where you want a clean prompt.
+
+```bash
+ALPHA_NO_PROJECT_CONTEXT=1 python main.py
+```
+
+### What to put in `ALPHA.md`
+
+Stable project-level guidance — convention, conventions, dependencies,
+identity, "don't do X here". For *running state* (sprint progress, open
+issues, recent fixes) use `docs/STATUS.md` instead — that file rotates
+quickly and bloats the system prompt.
+
+---
+
+## 7. Skills — creating, sharing, hiding
 
 Skills are markdown playbooks (`SKILL.md`) the agent loads on demand.
 Browse them with `/skills`, invoke with `/<skill-name> [args]`.
@@ -297,7 +347,7 @@ frontmatter, description triggers, body structure, and validation.
 
 ---
 
-## 7. Approval flow
+## 8. Approval flow
 
 When the agent calls a `DESTRUCTIVE` tool that isn't in your `allow` list,
 you'll see:
@@ -318,7 +368,7 @@ automatically without prompts.
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 **`API key not set for <provider>`** — The `*_API_KEY` env var is missing.
 Check `.env` is in the project root and `pip install -e .` was run with
@@ -347,7 +397,7 @@ current state of every skill (complete / inactive / broken).
 
 ---
 
-## 9. Tips
+## 10. Tips
 
 - Drop a project-level `CLAUDE.md` (or any file containing project context)
   and reference it in your prompt: *"siga o que o CLAUDE.md diz"*.

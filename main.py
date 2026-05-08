@@ -62,7 +62,10 @@ from alpha.history import (
 
 
 def _build_system_prompt(agent: AgentScope | None = None) -> str:
-    """Load base system prompt, apply agent extras, inject (filtered) skill index."""
+    """Load base system prompt, apply agent extras, inject (filtered) skill index,
+    and append per-project context from ALPHA.md (if found)."""
+    from alpha.project_context import inject_project_context, load_project_context
+
     load_all_skills()
     base = load_system_prompt()
     if agent is not None and agent.system_prompt_extra:
@@ -72,7 +75,8 @@ def _build_system_prompt(agent: AgentScope | None = None) -> str:
         if agent is not None and (agent.skills_allow or agent.skills_deny)
         else None
     )
-    return inject_skill_index(base, name_filter=skill_filter)
+    base = inject_skill_index(base, name_filter=skill_filter)
+    return inject_project_context(base, load_project_context())
 
 
 def _get_tools_for_agent(agent: AgentScope | None):
@@ -340,6 +344,18 @@ def run_repl(provider: str, temperature: float):
 
     if active_agent:
         print_phase(f"Active agent: {active_agent.name}")
+
+    # Surface auto-loaded project context so the user sees what Alpha
+    # picked up. Uses the same loader as `_build_system_prompt` — both
+    # paths are cheap (single read, capped at MAX_BYTES) so the redundant
+    # call is fine.
+    from alpha.project_context import load_project_context
+    _proj_ctx = load_project_context()
+    if _proj_ctx is not None:
+        rel = os.path.relpath(_proj_ctx.path)
+        size_kb = _proj_ctx.raw_size / 1024
+        suffix = " (truncated)" if _proj_ctx.truncated else ""
+        print_phase(f"Project context: {rel} ({size_kb:.1f} KB){suffix}")
 
     while True:
         try:
@@ -695,7 +711,53 @@ def run_repl(provider: str, temperature: float):
                 if not cfg["supports_tools"]:
                     print(f"  {c(C.YELLOW, '⚠')} {c(C.GRAY, 'chat-only mode — tools disabled for this model')}")
                 continue
+            elif cmd == "/init":
+                # Mirror Claude Code's /init: synthesize a prompt that asks
+                # the agent to analyze the project and draft an ALPHA.md.
+                # The agent uses normal tools (project_overview, read_file
+                # on manifests, etc.) and writes the file via write_file.
+                from alpha.project_context import CONTEXT_FILENAME
+                target = Path(os.getcwd()) / CONTEXT_FILENAME
+                force = "--force" in parts[1:]
+                if target.exists() and not force:
+                    print_error(
+                        f"{CONTEXT_FILENAME} already exists at {target}. "
+                        f"Pass /init --force to overwrite, or delete it first."
+                    )
+                    continue
+                action = "Overwrite the existing" if target.exists() else "Create a new"
+                user_input = (
+                    f"[/init invoked]\n"
+                    f"{action} `{CONTEXT_FILENAME}` at {target} that captures "
+                    f"this project's stable context for Alpha. Steps:\n"
+                    f"1. Run project_overview to learn the project layout, type, and git status.\n"
+                    f"2. Read the key manifest(s): pyproject.toml / package.json / "
+                    f"Cargo.toml / pom.xml / Gemfile / go.mod / requirements.txt — whichever exist.\n"
+                    f"3. Read README.md if present, plus 1–2 source entry points (main.py, "
+                    f"src/index.ts, app/main.py, etc.) to confirm the actual stack.\n"
+                    f"4. Write {CONTEXT_FILENAME} with these sections, in this order:\n"
+                    f"   - `# {CONTEXT_FILENAME} — <project name>` (one-line title)\n"
+                    f"   - `## What this project is` — one short paragraph.\n"
+                    f"   - `## Stack & dependencies` — language version, key libs, package manager.\n"
+                    f"   - `## How to run / build / test` — exact commands the user types.\n"
+                    f"   - `## House rules` — conventions you can infer (test framework, "
+                    f"linter, type-hint policy, comment policy). Mark inferences explicitly.\n"
+                    f"   - `## Status & docs` — point to STATUS.md / docs/ if they exist.\n"
+                    f"   - `## Out-of-scope` — anything obviously off-limits "
+                    f"(e.g. don't edit prompts/, never commit secrets).\n"
+                    f"5. Keep the file under 4 KB. No filler. No emoji. "
+                    f"Use plain Markdown. Do not invent commands you have not verified.\n"
+                    f"6. After writing, print a one-line confirmation summarizing what you "
+                    f"included and remind the user to review before committing."
+                )
+                print(
+                    f"  {c(C.GREEN, '✦')} {c(C.CYAN, '/init')} "
+                    f"{c(C.GRAY, f'— drafting {CONTEXT_FILENAME} for {os.path.basename(os.getcwd())}')}"
+                )
+                # Fall through to the LLM call with the synthetic prompt above.
+
             elif cmd == "/help":
+                print(f"  {c(C.CYAN, '/init')}     — Draft an ALPHA.md for this project")
                 print(f"  {c(C.CYAN, '/clear')}    — Clear history and screen")
                 print(f"  {c(C.CYAN, '/history')}  — Show conversation history")
                 print(f"  {c(C.CYAN, '/save')}     — Save current session")

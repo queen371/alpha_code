@@ -107,6 +107,7 @@ def _resolve_placeholders(text: str, attached: dict[int, Path]) -> tuple[str, li
 
 
 _BUILTIN_COMMANDS: list[tuple[str, str]] = [
+    ("/init", "Draft an ALPHA.md for this project"),
     ("/clear", "Clear history and screen"),
     ("/history", "Show conversation history"),
     ("/save", "Save current session"),
