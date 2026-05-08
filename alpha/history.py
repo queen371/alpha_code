@@ -9,9 +9,20 @@ Supports session summaries for quick resume and context continuity.
 import json
 import logging
 import os
+import re
 import secrets
 import time
 from pathlib import Path
+
+# Session IDs come from `generate_session_id()` (timestamp_hex8) but the REPL
+# also accepts user input via `/load <id>`. Without validation, an id like
+# `../etc/passwd` resolves outside ~/.alpha_code/history/ — read or overwrite
+# anywhere the process has access.
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+class InvalidSessionId(ValueError):
+    """Raised when a session_id contains path-traversal characters."""
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +67,24 @@ def _atomic_write(path: Path, data: str) -> None:
 
 
 def _session_path(session_id: str) -> Path:
-    return _ensure_dir() / f"{session_id}.json"
+    """Resolve session_id to an absolute path, refusing traversal.
+
+    Two layers of defense:
+    1. Allowlist regex on the id itself (no `/`, no `.`, no spaces).
+    2. After resolving, verify the path stays under the history dir —
+       catches any byte the regex missed (defense in depth).
+    """
+    if not session_id or not _SESSION_ID_RE.match(session_id):
+        raise InvalidSessionId(
+            f"Session id must match {_SESSION_ID_RE.pattern} — got {session_id!r}"
+        )
+    base = _ensure_dir().resolve()
+    candidate = (base / f"{session_id}.json").resolve()
+    if not candidate.is_relative_to(base):
+        raise InvalidSessionId(
+            f"Session id {session_id!r} escapes the history directory"
+        )
+    return candidate
 
 
 def generate_session_id() -> str:
@@ -202,7 +230,11 @@ def save_session(
     if metadata:
         data["metadata"] = metadata
 
-    path = _session_path(session_id)
+    try:
+        path = _session_path(session_id)
+    except InvalidSessionId as e:
+        logger.warning(f"save_session refused invalid id: {e}")
+        return Path("")
     try:
         # JSON compacto (#D025): sessions sao consumidas por programa, nao
         # por humanos. `indent=2` inflava arquivos em 30-50% e custava ~30%
@@ -232,9 +264,15 @@ def load_session(session_id: str) -> list[dict] | None:
     """
     Load conversation messages from disk.
 
-    Returns message list or None if not found.
+    Returns message list or None if not found, or if the id is invalid
+    (path traversal attempt — logged but not raised so the REPL doesn't
+    crash on a bad ``/load`` input).
     """
-    path = _session_path(session_id)
+    try:
+        path = _session_path(session_id)
+    except InvalidSessionId as e:
+        logger.warning(f"load_session refused invalid id: {e}")
+        return None
     if not path.exists():
         return None
 
@@ -250,9 +288,13 @@ def load_session_summary(session_id: str) -> str | None:
     """
     Load just the session summary for lightweight resume.
 
-    Returns summary string or None if not found.
+    Returns summary string or None if not found / invalid id.
     """
-    path = _session_path(session_id)
+    try:
+        path = _session_path(session_id)
+    except InvalidSessionId as e:
+        logger.warning(f"load_session_summary refused invalid id: {e}")
+        return None
     if not path.exists():
         return None
 
