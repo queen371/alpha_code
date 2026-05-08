@@ -2,7 +2,9 @@
 
 import os
 
-from alpha.config import FEATURES, get_available_providers, load_system_prompt
+import pytest
+
+from alpha.config import FEATURES, get_available_providers, get_provider_config, load_system_prompt
 
 
 class TestConfig:
@@ -31,3 +33,31 @@ class TestConfig:
         providers = get_available_providers()
         ollama = next(p for p in providers if p["id"] == "ollama")
         assert ollama["available"] is True
+
+
+class TestProviderVisionFlag:
+    """get_provider_config must expose supports_vision per provider."""
+
+    def test_openai_supports_vision(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test")
+        cfg = get_provider_config("openai")
+        assert cfg["supports_vision"] is True
+
+    def test_anthropic_supports_vision(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+        cfg = get_provider_config("anthropic")
+        assert cfg["supports_vision"] is True
+
+    def test_deepseek_does_not_support_vision(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test")
+        cfg = get_provider_config("deepseek")
+        assert cfg["supports_vision"] is False
+
+    def test_grok_does_not_support_vision(self, monkeypatch):
+        monkeypatch.setenv("GROK_API_KEY", "test")
+        cfg = get_provider_config("grok")
+        assert cfg["supports_vision"] is False
+
+    def test_ollama_does_not_support_vision_by_default(self):
+        cfg = get_provider_config("ollama")
+        assert cfg["supports_vision"] is False

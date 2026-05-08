@@ -262,6 +262,13 @@ def run_repl(provider: str, temperature: float):
         # Inject CWD context
         cwd = os.getcwd()
         contextualized = f"[CWD: {cwd}]\n{user_input}"
+        if image_paths and not cfg.get("supports_vision", False):
+            print_error(
+                f"Provider '{provider}' (modelo {cfg['model']}) nao suporta imagens. "
+                f"Imagem(s) ignorada(s). Use /provider para trocar para um vision-capable "
+                f"(ex: openai, anthropic) ou descreva o conteudo textualmente."
+            )
+            image_paths = []
         user_content = build_user_content(contextualized, image_paths)
         if image_paths:
             print(c(C.GRAY, f"  ({len(image_paths)} image(s) attached)"))

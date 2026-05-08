@@ -75,8 +75,9 @@ _BLOCKED_CALL_NAMES = frozenset({
 })
 
 # Attribute / name access tokens. These names are dangerous either as
-# dotted-attr (`x.__subclasses__`) or as bare Name nodes — both shapes
-# are caught by the validator below.
+# dotted-attr (`x.__subclasses__`), bare Name (`__subclasses__`), or as
+# Subscript constant (`obj["__subclasses__"]`) — all three shapes are
+# caught by the validator below.
 _BLOCKED_NAME_TOKENS = frozenset({
     "__loader__", "__builtins__", "__subclasses__",
     # __getattribute__ / __getattr__ / __setattr__ allow indirect attribute
@@ -92,6 +93,12 @@ _BLOCKED_NAME_TOKENS = frozenset({
     # Code-object access — could let a determined caller construct a
     # function with a bytecode payload.
     "__code__", "__closure__", "__globals__",
+    # AUDIT V1.2 #012: traversal via `().__class__.__bases__[0]` reach into
+    # `object` and from there `__subclasses__()` enumerates loaded classes
+    # — `subprocess.Popen`, `os.system` reachable mesmo com modulos
+    # bloqueados. Bloquear toda a cluster MRO/bases/dict.
+    "__class__", "__bases__", "__base__", "__mro__", "__dict__",
+    "__import__",
 })
 
 _OPEN_WRITE_MODES = frozenset({"w", "wb", "a", "ab", "x", "xb", "w+", "r+", "rb+"})
@@ -128,17 +135,31 @@ def _validate_code_safety(code: str) -> str | None:
                 fname = fn.attr
             if fname in _BLOCKED_CALL_NAMES:
                 return _format_block(f"{fname}(...)")
-            # open(path, "w") — block apenas modo de escrita real
+            # open(path, "w") — block modos de escrita reais.
+            # AUDIT V1.2 #012: se o mode nao e Constant string (ex:
+            # `m = "w"; open(p, m)` com `mode_node` = ast.Name), o check
+            # antigo passava silenciosamente. Defense-in-depth: rejeitar
+            # qualquer open() com mode nao-Constant (forca o codigo a
+            # explicitar o modo, eliminando bypass via variavel/expressao).
             if fname == "open" and len(node.args) >= 2:
                 mode_node = node.args[1]
                 if isinstance(mode_node, ast.Constant) and isinstance(mode_node.value, str):
                     if mode_node.value in _OPEN_WRITE_MODES:
                         return _format_block(f"open(..., {mode_node.value!r})")
+                elif not isinstance(mode_node, ast.Constant):
+                    return _format_block("open(..., <non-constant mode>)")
         # __builtins__ / __loader__ / x.__subclasses__()
         elif isinstance(node, ast.Name) and node.id in _BLOCKED_NAME_TOKENS:
             return _format_block(node.id)
         elif isinstance(node, ast.Attribute) and node.attr in _BLOCKED_NAME_TOKENS:
             return _format_block(f".{node.attr}")
+        # AUDIT V1.2 #012: Subscript com Constant value bloqueado —
+        # `obj["__subclasses__"]` pegava o mesmo gadget que `obj.__subclasses__`
+        # mas o validator antigo so cobria `Attribute`/`Name`.
+        elif isinstance(node, ast.Subscript):
+            sl = node.slice
+            if isinstance(sl, ast.Constant) and sl.value in _BLOCKED_NAME_TOKENS:
+                return _format_block(f"[{sl.value!r}]")
     return None
 
 
@@ -229,6 +250,25 @@ async def _install_package(package: str) -> dict:
     if not VALID_PACKAGE_RE.match(package):
         return {
             "error": f"Nome de pacote inválido: '{package}'. Use formato: 'nome' ou 'nome==versão'"
+        }
+
+    # AUDIT_V1.2 #050: rejeitar pip install fora de virtualenv. Sem este check,
+    # `pip install ...` em python global tenta `/usr/lib/python*/site-packages/`
+    # (sudo required → falha) OU `~/.local/...` (sucesso silencioso). O segundo
+    # caso e perigoso: o pacote vai pra location diferente da que o agent usa,
+    # entao o proximo `import` falha mesmo com "install ok". Pior: contamina
+    # o user-site global do sistema do usuario com pacotes do agent.
+    # Opt-out via ALPHA_ALLOW_GLOBAL_PIP=1 para usuarios que sabem o que fazem.
+    if sys.prefix == sys.base_prefix and not os.environ.get(
+        "ALPHA_ALLOW_GLOBAL_PIP", ""
+    ).strip().lower() in ("1", "true", "yes", "on"):
+        return {
+            "error": (
+                "install_package requer um virtualenv ativo. "
+                "Ative `.venv` (source .venv/bin/activate) ou rode com "
+                "ALPHA_ALLOW_GLOBAL_PIP=1 se realmente quer instalar global."
+            ),
+            "blocked": True,
         }
 
     proc = await asyncio.create_subprocess_exec(

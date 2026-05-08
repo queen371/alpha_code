@@ -49,6 +49,19 @@ are also exported for convenience:
 - `ALPHA_USER_PROMPT` — user's input text (on_user_prompt only)
 - `ALPHA_WORKSPACE` — active workspace path (if any)
 
+## Security note — hooks see all secrets
+
+Unlike tool execution paths (which go through `safe_env` to strip API keys
+before subprocess), hooks receive the **raw `os.environ`** including every
+credential in `.env` and the parent shell. This is intentional — hooks
+need env vars to integrate with linters/CI/audit tools — but it means a
+malicious or careless hook command that exfiltrates env (`curl -d "$(env)"`,
+`env > /tmp/leak`, etc.) leaks everything.
+
+Treat `.alpha/settings.json` as you would a `.bashrc`: only paste commands
+from sources you trust. See `docs/USER_GUIDE.md` § Hooks for the user-facing
+warning. Tracked as DEEP_SECURITY V3.0 #D118.
+
 ## Matcher
 
 A regex applied to the tool name (pre/post_tool only). If omitted or empty,

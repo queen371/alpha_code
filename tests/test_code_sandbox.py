@@ -137,6 +137,86 @@ class TestAuditV12ReflectionBypasses:
         assert result is not None, f"Expected block: {code!r}"
 
 
+class TestAuditV12MroTraversal:
+    """AUDIT V1.2 #012 follow-up: a cluster `__class__` / `__bases__` /
+    `__mro__` / `__dict__` permite chegar em `object.__subclasses__()` mesmo
+    com `__subclasses__` ja bloqueado, porque o gadget tipico e
+    `().__class__.__bases__[0]` ou `type(x).__mro__[-1]`. Bloquear toda a
+    superficie de traversal fecha o ataque um nivel acima.
+    """
+
+    @pytest.mark.parametrize("code", [
+        # Direct dotted access — most common in CTF payloads.
+        "x = ().__class__",
+        "x = ''.__class__",
+        "x = type.__bases__",
+        "x = obj.__base__",
+        "x = type.__mro__",
+        "x = vars_dict = obj.__dict__",
+        # The classic gadget chain that __getattribute__ paper uses.
+        "().__class__.__bases__[0]",
+        "().__class__.__mro__[1]",
+    ])
+    def test_mro_traversal_blocked(self, code):
+        result = _validate_code_safety(code)
+        assert result is not None, f"Expected block: {code!r}"
+
+
+class TestAuditV12SubscriptBypass:
+    """AUDIT V1.2 #012 follow-up: `obj["__subclasses__"]` accomplishes the
+    same lookup as `obj.__subclasses__` but goes through __getitem__/Subscript
+    AST nodes that the original validator never inspected. The Subscript
+    branch only checks Constant slices — Name/expression slices fall through
+    (intentional, since `obj[var]` lookups are common in legitimate code).
+    """
+
+    @pytest.mark.parametrize("code", [
+        'obj["__subclasses__"]',
+        'obj["__class__"]',
+        'obj["__bases__"]',
+        'obj["__mro__"]',
+        'obj["__getattribute__"]',
+        'obj["__globals__"]',
+        'obj["__code__"]',
+        # Combined with assignment / call — exploit shape.
+        'gadget = ().__class__.__bases__[0]\nshell = gadget["__subclasses__"]()',
+    ])
+    def test_subscript_blocked(self, code):
+        result = _validate_code_safety(code)
+        assert result is not None, f"Expected block: {code!r}"
+
+
+class TestAuditV12OpenNonConstantMode:
+    """AUDIT V1.2 #012: `open(path, mode_var)` with a non-Constant mode
+    bypassed the write-mode check because the validator only inspected
+    `ast.Constant` slices. Defense-in-depth: reject ANY non-constant mode
+    so the validator can statically prove the mode never reaches a write.
+    """
+
+    @pytest.mark.parametrize("code", [
+        # mode via Name binding.
+        'mode = "w"\nopen("/etc/passwd", mode)',
+        # mode via expression.
+        'open("/etc/passwd", "r" + "+")',
+        # mode via function call (chr(119) == "w").
+        'open("x", chr(119) + chr(43))',
+        # mode via subscript / index.
+        'modes = ["r", "w"]\nopen("x", modes[1])',
+        # mode via conditional expression.
+        'open("x", "w" if True else "r")',
+    ])
+    def test_open_nonconstant_mode_blocked(self, code):
+        result = _validate_code_safety(code)
+        assert result is not None, f"Expected block: {code!r}"
+
+    def test_open_constant_read_mode_passes(self):
+        # Constant read modes (r, rb, rt) should still be allowed.
+        assert _validate_code_safety('open("x", "r")') is None
+        assert _validate_code_safety('open("x", "rb")') is None
+        # And open() with no mode arg — defaults to "r" — should pass.
+        assert _validate_code_safety('open("x")') is None
+
+
 class TestSafeCodeStillPassesAfterV12:
     """Regression: blocklist expansion did not break legitimate code that
     happens to use common builtins or modules."""

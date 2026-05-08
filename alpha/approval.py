@@ -149,10 +149,17 @@ _SAFE_GIT_ACTIONS = frozenset(
     }
 )
 
-# Git write actions auto-approved (non-destructive)
-_AUTO_GIT_ACTIONS = frozenset(
-    {"add", "commit", "checkout", "stash", "pull", "fetch"}
-)
+# Git write actions auto-approved (non-destructive AND no data-loss risk).
+# DEEP_SECURITY V3.0 #D116: `checkout`, `stash`, `pull`, `merge`, `rebase`
+# foram REMOVIDOS desta lista — todos podem destruir trabalho local sem
+# prompt:
+#   - checkout: `git checkout file.txt` overwrite uncommitted changes
+#   - stash: `git stash` (sem -k) move working dir state, sumindo do view
+#     ate `stash pop`; pode dar a sensacao de perda de dados
+#   - pull: `git pull --rebase` re-escreve commits locais em conflito
+#   - merge/rebase: idem
+# Ficam aqui so as acoes idempotentes ou aditivas (add, commit, fetch).
+_AUTO_GIT_ACTIONS = frozenset({"add", "commit", "fetch"})
 
 
 def _is_find_exec_safe(parts: list[str]) -> bool:

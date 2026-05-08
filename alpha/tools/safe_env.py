@@ -9,14 +9,41 @@ import re
 import time
 
 _SENSITIVE_PATTERNS = re.compile(
-    r"(API_KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|PRIVATE_KEY"
-    r"|_URL$|PROXY|DATABASE|DSN|REDIS|MONGO|POSTGRES|CONTROL_PORT)",
+    # Boundary nota: `\b` em regex Python trata `_` como char de palavra,
+    # entao `\bAUTH\b` NAO matcha em `BASIC_AUTH` (a fronteira entre `_` e
+    # `A` nao existe). Usamos `(?:^|_)WORD(?:_|$)` explicitamente para
+    # tratar `_` como separador, sem casar `KEYBOARD`/`MONKEY` etc.
+    #
+    # Generic credential tokens.
+    r"(?:^|_)(KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL|CREDENTIALS"
+    r"|AUTH|PAT|DSN|APIKEY)(?:_|$)"
+    # Composicoes consagradas (#011: AWS_ACCESS_KEY_ID, OPENAI_KEY,
+    # KAGGLE_KEY, AZURE_OPENAI_KEY, BASIC_AUTH, GITHUB_PAT vazavam).
+    r"|(?:^|_)(API|ACCESS|PRIVATE|PUBLIC|SIGNING|ENCRYPTION|MASTER)"
+    r"_(KEY|SECRET|TOKEN)(?:_|$)"
+    # Provedores cloud / SaaS comuns — captura prefixo do env mesmo se o
+    # sufixo for atipico (GH_X, AWS_FOO, AZURE_BAR, etc).
+    r"|^(AWS|GH|GCP|GITHUB|AZURE|OPENAI|ANTHROPIC|HF|HUGGINGFACE|NPM|PYPI"
+    r"|KAGGLE|DOCKER|DEEPSEEK|GROK|APIFY|STRIPE|TWILIO|SENDGRID|MAILGUN"
+    r"|SLACK|DISCORD|TELEGRAM|FIREBASE|VERCEL|CLOUDFLARE|HEROKU|RAILWAY"
+    r"|SUPABASE|PLANETSCALE|DIGITALOCEAN|LINODE|UPSTASH|DO)_"
+    # Dados de conexao / DB.
+    r"|(?:^|_)(DATABASE|REDIS|MONGO|POSTGRES|MYSQL|SQLITE)_URL(?:$|_)"
+    r"|_URL$"
+    r"|(?:^|_)(PROXY|CONTROL_PORT)(?:$|_)",
     re.IGNORECASE,
 )
 
+# Vars que nao casam o regex acima mas vazam credenciais por contexto.
 _EXPLICIT_KEYS = frozenset(
     {
         "GOOGLE_APPLICATION_CREDENTIALS",
+        "SSH_AUTH_SOCK", "SSH_AGENT_PID",
+        "GPG_AGENT_INFO",
+        "GIT_ASKPASS", "SSH_ASKPASS",
+        "AWS_PROFILE", "AWS_DEFAULT_PROFILE",
+        "KUBECONFIG",
+        "NETRC",
     }
 )
 

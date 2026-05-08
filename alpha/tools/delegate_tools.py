@@ -144,7 +144,13 @@ async def _run_subagent(
 
     # Lazy imports to avoid circular dependencies
     from ..agent import run_agent
-    from ..config import DEFAULT_PROVIDER, FEATURES as feat
+    from ..config import (
+        DEFAULT_PROVIDER,
+        FEATURES as feat,
+        get_subagent_allow,
+        get_subagent_extra_block,
+        get_subagent_policy,
+    )
     from . import get_openai_tools, get_tool
 
     max_iterations = feat.get("subagent_max_iterations", 15)
@@ -186,18 +192,19 @@ async def _run_subagent(
     # Policy lives in SUBAGENT_DESTRUCTIVE_BLOCKLIST (module level) so tests
     # can validate the surface independently of an actual run.
     #
-    # #D007 (V1.0): policy + extra_block + allow vem de FEATURES (env-driven).
+    # #D007 (V1.0): policy + extra_block + allow vem de env via getters
+    # (AUDIT_V1.2 #014: cache de import-time perdia mudancas runtime).
     # - "strict" (default): bloqueia destructive em modo no-callback (comportamento antigo)
     # - "relaxed": confia no sub-agent, so anti-recursao
     # - extra_block: usuario pode fortalecer
     # - allow: usuario pode aliviar (sobrepoe blocklist)
     _blocked = {"delegate_task", "delegate_parallel"}
     all_tools = get_openai_tools()
-    policy = feat.get("subagent_policy", "strict")
+    policy = get_subagent_policy()
     if parent_approval_callback is None and policy != "relaxed":
         _blocked = _blocked | SUBAGENT_DESTRUCTIVE_BLOCKLIST
-    _blocked = _blocked | feat.get("subagent_extra_block", frozenset())
-    _blocked = _blocked - feat.get("subagent_allow", frozenset())
+    _blocked = _blocked | get_subagent_extra_block()
+    _blocked = _blocked - get_subagent_allow()
     # `delegate_*` continua bloqueado mesmo se usuario incluir em
     # subagent_allow — anti-recursao e invariante, nao policy.
     _blocked = _blocked | {"delegate_task", "delegate_parallel"}

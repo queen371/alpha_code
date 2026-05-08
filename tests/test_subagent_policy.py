@@ -1,11 +1,14 @@
-"""Coverage para `subagent_policy` configuravel (#D007 V1.0).
+"""Coverage para `subagent_policy` configuravel via runtime getters.
 
 Cobre:
-- FEATURES expoe `subagent_policy`, `subagent_extra_block`, `subagent_allow`
+- `get_subagent_policy()` / `get_subagent_extra_block()` / `get_subagent_allow()`
+  exportados de `alpha.config`
 - Defaults preservam comportamento antigo (strict + nada extra)
-- Env vars `ALPHA_SUBAGENT_POLICY/EXTRA_BLOCK/ALLOW` sao lidas pelo config
-- delegate_tools._run_subagent constroi o blocklist usando os 3 knobs
-- delegate_* sempre bloqueado (anti-recursao) mesmo com policy=relaxed ou allow=delegate_task
+- AUDIT_V1.2 #014: getters leem env A CADA CALL (nao cache de import-time)
+  — `monkeypatch.setenv` pos-import deve afetar comportamento
+- `delegate_tools._run_subagent` usa os getters em vez de FEATURES dict
+- `delegate_*` sempre bloqueado (anti-recursao) mesmo com policy=relaxed
+  ou allow incluindo delegate_task
 """
 
 from __future__ import annotations
@@ -15,75 +18,110 @@ import inspect
 import pytest
 
 
-class TestFeaturesExposesPolicyKeys:
-    def test_default_policy_is_strict(self):
-        from alpha.config import FEATURES
+class TestGettersDefaults:
+    """Valores default quando env nao esta setada."""
 
-        assert FEATURES.get("subagent_policy") == "strict"
+    def test_default_policy_is_strict(self, monkeypatch):
+        monkeypatch.delenv("ALPHA_SUBAGENT_POLICY", raising=False)
+        from alpha.config import get_subagent_policy
+        assert get_subagent_policy() == "strict"
 
-    def test_default_extra_block_empty(self):
-        from alpha.config import FEATURES
+    def test_default_extra_block_empty(self, monkeypatch):
+        monkeypatch.delenv("ALPHA_SUBAGENT_EXTRA_BLOCK", raising=False)
+        from alpha.config import get_subagent_extra_block
+        assert get_subagent_extra_block() == frozenset()
 
-        assert FEATURES.get("subagent_extra_block") == frozenset()
-
-    def test_default_allow_empty(self):
-        from alpha.config import FEATURES
-
-        assert FEATURES.get("subagent_allow") == frozenset()
+    def test_default_allow_empty(self, monkeypatch):
+        monkeypatch.delenv("ALPHA_SUBAGENT_ALLOW", raising=False)
+        from alpha.config import get_subagent_allow
+        assert get_subagent_allow() == frozenset()
 
 
-class TestEnvVarOverrides:
-    def test_subagent_policy_env_read_at_import(self, monkeypatch):
-        # config.py le env no import — para testar override precisamos
-        # forcar reimport. Em vez disso, exercitamos a expressao
-        # inline que o config faz, garantindo que `os.environ.get`
-        # funciona como esperado.
-        import os
+class TestRuntimeEnvOverrides:
+    """AUDIT_V1.2 #014: getters refletem mudanca runtime em os.environ.
+
+    Antes do fix, `FEATURES["subagent_policy"]` era resolvido no IMPORT do
+    modulo, congelando a flag. Hooks/scripts/testes que setassem env apos
+    o import nao surtiam efeito ate reload — confusao operacional + bug
+    silencioso. Agora cada call le env de novo.
+    """
+
+    def test_policy_changes_reflect_immediately(self, monkeypatch):
+        from alpha.config import get_subagent_policy
 
         monkeypatch.setenv("ALPHA_SUBAGENT_POLICY", "relaxed")
-        assert os.environ.get("ALPHA_SUBAGENT_POLICY", "strict") == "relaxed"
+        assert get_subagent_policy() == "relaxed"
 
-    def test_extra_block_csv_parsing(self):
-        env_value = "write_file, edit_file ,  http_request"
-        parsed = frozenset(t.strip() for t in env_value.split(",") if t.strip())
-        assert parsed == {"write_file", "edit_file", "http_request"}
+        monkeypatch.setenv("ALPHA_SUBAGENT_POLICY", "strict")
+        assert get_subagent_policy() == "strict"
 
-    def test_allow_csv_parsing_empty_yields_empty_frozenset(self):
-        env_value = ""
-        parsed = frozenset(t.strip() for t in env_value.split(",") if t.strip())
-        assert parsed == frozenset()
+    def test_extra_block_csv_parsing(self, monkeypatch):
+        from alpha.config import get_subagent_extra_block
+
+        monkeypatch.setenv(
+            "ALPHA_SUBAGENT_EXTRA_BLOCK",
+            "write_file, edit_file ,  http_request",
+        )
+        assert get_subagent_extra_block() == {
+            "write_file", "edit_file", "http_request",
+        }
+
+    def test_extra_block_empty_yields_empty_frozenset(self, monkeypatch):
+        from alpha.config import get_subagent_extra_block
+
+        monkeypatch.setenv("ALPHA_SUBAGENT_EXTRA_BLOCK", "")
+        assert get_subagent_extra_block() == frozenset()
+
+    def test_allow_runtime_change(self, monkeypatch):
+        from alpha.config import get_subagent_allow
+
+        # Sem env: vazio.
+        monkeypatch.delenv("ALPHA_SUBAGENT_ALLOW", raising=False)
+        assert get_subagent_allow() == frozenset()
+
+        # Set: returns parsed.
+        monkeypatch.setenv("ALPHA_SUBAGENT_ALLOW", "execute_shell,http_request")
+        assert get_subagent_allow() == {"execute_shell", "http_request"}
+
+        # Unset: back to empty (NOT cached).
+        monkeypatch.delenv("ALPHA_SUBAGENT_ALLOW", raising=False)
+        assert get_subagent_allow() == frozenset()
 
 
-class TestRunSubagentReadsPolicy:
-    def test_blocklist_construction_uses_feat_keys(self):
-        """Garante que o codigo le `subagent_policy`/`extra_block`/`allow`
-        de `FEATURES` em vez de hardcoded."""
+class TestRunSubagentReadsGetters:
+    """`_run_subagent` chama os getters runtime em vez de FEATURES dict."""
+
+    def test_run_subagent_calls_getters(self):
         from alpha.tools import delegate_tools
 
         src = inspect.getsource(delegate_tools._run_subagent)
-        assert 'feat.get("subagent_policy"' in src
-        assert 'feat.get("subagent_extra_block"' in src
-        assert 'feat.get("subagent_allow"' in src
+        # Os 3 getters devem ser chamados.
+        assert "get_subagent_policy()" in src
+        assert "get_subagent_extra_block()" in src
+        assert "get_subagent_allow()" in src
+
+    def test_does_not_use_stale_feat_dict(self):
+        """Garante que o codigo NAO le mais via `feat.get("subagent_*")`,
+        evitando regressao silenciosa do cache import-time."""
+        from alpha.tools import delegate_tools
+
+        src = inspect.getsource(delegate_tools._run_subagent)
+        assert 'feat.get("subagent_policy"' not in src
+        assert 'feat.get("subagent_extra_block"' not in src
+        assert 'feat.get("subagent_allow"' not in src
 
     def test_relaxed_policy_skips_destructive_blocklist(self):
-        """Com policy=relaxed, SUBAGENT_DESTRUCTIVE_BLOCKLIST nao e aplicado."""
         from alpha.tools import delegate_tools
 
         src = inspect.getsource(delegate_tools._run_subagent)
-        # Logica condicional deve gatilhar so quando policy != relaxed
         assert 'policy != "relaxed"' in src or 'policy == "strict"' in src
 
     def test_delegate_invariant_preserved(self):
-        """Mesmo com allow incluindo delegate_*, anti-recursao deve permanecer.
-
-        O codigo re-aplica `_blocked = _blocked | {"delegate_task", "delegate_parallel"}`
-        depois de aplicar o allow override.
-        """
+        """Mesmo com allow incluindo delegate_*, anti-recursao permanece."""
         from alpha.tools import delegate_tools
 
         src = inspect.getsource(delegate_tools._run_subagent)
-        # Conta ocorrencias do set anti-recursao — esperamos no minimo 2:
-        # uma no inicio, outra depois do allow override.
+        # Conta ocorrencias — esperamos no minimo 2 (inicio + apos allow override).
         assert src.count('"delegate_task", "delegate_parallel"') >= 2
 
 

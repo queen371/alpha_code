@@ -52,12 +52,14 @@ _PROVIDERS = {
         "api_key_env": "DEEPSEEK_API_KEY",
         "model_env": "DEEPSEEK_MODEL",
         "default_model": "deepseek-v4-pro",
+        "supports_vision": False,
     },
     "openai": {
         "base_url": os.getenv("OPENAI_API_BASE_URL", "https://api.openai.com/v1"),
         "api_key_env": "OPENAI_API_KEY",
         "model_env": "OPENAI_MODEL",
         "default_model": "gpt-4o",
+        "supports_vision": True,
     },
     "anthropic": {
         "base_url": os.getenv("ANTHROPIC_API_BASE_URL", "https://api.anthropic.com/v1"),
@@ -65,12 +67,14 @@ _PROVIDERS = {
         "model_env": "ANTHROPIC_MODEL",
         "default_model": "claude-sonnet-4-6",
         "api_format": "anthropic",
+        "supports_vision": True,
     },
     "grok": {
         "base_url": os.getenv("GROK_API_BASE_URL", "https://api.x.ai/v1"),
         "api_key_env": "GROK_API_KEY",
         "model_env": "GROK_MODEL",
         "default_model": "grok-4-1-fast-reasoning",
+        "supports_vision": False,
     },
     "ollama": {
         "base_url": os.getenv("OLLAMA_API_BASE_URL", "http://localhost:11434/v1"),
@@ -78,6 +82,7 @@ _PROVIDERS = {
         "model_env": "OLLAMA_MODEL",
         "default_model": "qwen-heavy-abliterated:32b",
         "low_temperature": True,
+        "supports_vision": False,
     },
     "gemma-12b": {
         "base_url": os.getenv("OLLAMA_API_BASE_URL", "http://localhost:11434/v1"),
@@ -86,6 +91,7 @@ _PROVIDERS = {
         "default_model": "gemma3:12b",
         "supports_tools": False,
         "low_temperature": True,
+        "supports_vision": False,
     },
     "gemma-27b": {
         "base_url": os.getenv("OLLAMA_API_BASE_URL", "http://localhost:11434/v1"),
@@ -94,6 +100,7 @@ _PROVIDERS = {
         "default_model": "gemma3:27b",
         "supports_tools": False,
         "low_temperature": True,
+        "supports_vision": False,
     },
 }
 
@@ -126,6 +133,7 @@ def get_provider_config(provider: str) -> dict:
     model = os.getenv(cfg.get("model_env", ""), cfg["default_model"])
     supports_tools = cfg.get("supports_tools", True)
     api_format = cfg.get("api_format", "openai")
+    supports_vision = cfg.get("supports_vision", False)
 
     return {
         "base_url": base_url,
@@ -133,6 +141,7 @@ def get_provider_config(provider: str) -> dict:
         "model": model,
         "supports_tools": supports_tools,
         "api_format": api_format,
+        "supports_vision": supports_vision,
     }
 
 
@@ -188,28 +197,50 @@ FEATURES: dict = {
     # controla concorrencia, nao total. Sem cap, o modelo pode submeter
     # array de 100 tasks * 15 iteracoes = 1500 chamadas LLM silenciosas.
     "max_delegate_total_tasks": 10,
-    # #D007 (V1.0): politica de bloqueio do sub-agent. "strict" (default)
-    # bloqueia tools destrutivas quando nao ha approval callback do parent —
-    # comportamento de antes. "relaxed" deixa o sub-agent usar tudo exceto
-    # delegate_* (anti-recursao). Antes essa logica era hardcoded em
-    # `delegate_tools._run_subagent` sem maneira de o usuario ajustar
-    # — daemon mode / scripts batch precisavam custom-patch o source.
-    "subagent_policy": os.environ.get("ALPHA_SUBAGENT_POLICY", "strict"),
-    # Tools extra a bloquear no sub-agent (alem de SUBAGENT_DESTRUCTIVE_BLOCKLIST).
-    # Comma-separated. Ex: ALPHA_SUBAGENT_EXTRA_BLOCK=write_file,edit_file
-    "subagent_extra_block": frozenset(
-        t.strip()
-        for t in os.environ.get("ALPHA_SUBAGENT_EXTRA_BLOCK", "").split(",")
-        if t.strip()
-    ),
-    # Tools que o sub-agent pode usar mesmo estando na blocklist default.
-    # Comma-separated. Ex: ALPHA_SUBAGENT_ALLOW=execute_shell,http_request
-    "subagent_allow": frozenset(
-        t.strip()
-        for t in os.environ.get("ALPHA_SUBAGENT_ALLOW", "").split(",")
-        if t.strip()
-    ),
+    # subagent_policy / subagent_extra_block / subagent_allow: nao mais aqui.
+    # AUDIT_V1.2 #014: o codigo antigo lia `os.environ.get(...)` no IMPORT do
+    # modulo, congelando a flag. Mudancas runtime em os.environ (ex: hook
+    # configurando policy, teste com monkeypatch) nao surtiam efeito ate
+    # reload. Vide getters abaixo (`get_subagent_policy()` etc) — `delegate_tools`
+    # consulta a env a cada call em vez de cache stale.
 }
+
+
+# AUDIT_V1.2 #014: getters runtime para flags dependentes de env. Ler env a
+# cada call e barato (poucas chamadas por turn) e elimina a categoria de
+# bug "mudou env mas nada mudou ate restart". Mantemos a leitura confinada
+# a estes 3 helpers em vez de espalhar `os.environ.get(...)` pelo codebase.
+
+def get_subagent_policy() -> str:
+    """Politica de bloqueio do sub-agent (strict | relaxed).
+
+    `strict` (default): bloqueia destructive tools quando nao ha approval
+    callback do parent. `relaxed`: confia no sub-agent — so delegate_*
+    bloqueado (anti-recursao). Lido a cada call para refletir mudancas
+    em runtime (hooks, testes, scripts).
+    """
+    return os.environ.get("ALPHA_SUBAGENT_POLICY", "strict")
+
+
+def get_subagent_extra_block() -> frozenset[str]:
+    """Tools extras a bloquear no sub-agent alem de SUBAGENT_DESTRUCTIVE_BLOCKLIST.
+
+    Lido de `ALPHA_SUBAGENT_EXTRA_BLOCK` (comma-separated). Ex: bloquear
+    write_file e edit_file em sub-agents — `ALPHA_SUBAGENT_EXTRA_BLOCK=write_file,edit_file`.
+    """
+    raw = os.environ.get("ALPHA_SUBAGENT_EXTRA_BLOCK", "")
+    return frozenset(t.strip() for t in raw.split(",") if t.strip())
+
+
+def get_subagent_allow() -> frozenset[str]:
+    """Tools que o sub-agent pode usar mesmo estando na blocklist default.
+
+    Lido de `ALPHA_SUBAGENT_ALLOW`. Sobrepoe o default — usar com cuidado.
+    `delegate_*` continua bloqueado mesmo se o usuario incluir aqui (anti-recursao
+    e invariante, nao policy).
+    """
+    raw = os.environ.get("ALPHA_SUBAGENT_ALLOW", "")
+    return frozenset(t.strip() for t in raw.split(",") if t.strip())
 
 
 # ─── Tool Timeouts (seconds) ───

@@ -75,29 +75,28 @@ class TestOpenRedirectFiles:
         self, tmp_path, monkeypatch
     ):
         """O bug real: primeiro redirect abre, segundo falha — o primeiro
-        DEVE ter sido fechado antes do raise."""
+        DEVE ter sido fechado antes do raise.
+
+        Apos #D117 (O_NOFOLLOW), `_open_redirect_files` usa `os.open` +
+        `os.fdopen` em vez de `builtins.open`. Patchamos `os.fdopen`
+        em `pipeline_tools` para capturar handles e verificar close().
+        """
         from alpha.tools import pipeline_tools
 
         _patch_workspace(monkeypatch, tmp_path)
 
-        # Capturamos handles abertos via patching de `open` para verificar
-        # que close() foi chamado em todos antes do raise.
         opened_handles: list = []
-        original_open = open
+        import os as _os
+        original_fdopen = _os.fdopen
 
-        def tracking_open(*args, **kwargs):
-            fh = original_open(*args, **kwargs)
+        def tracking_fdopen(*args, **kwargs):
+            fh = original_fdopen(*args, **kwargs)
             opened_handles.append(fh)
             return fh
 
-        monkeypatch.setattr(
-            "alpha.tools.pipeline_tools.open", tracking_open, raising=False
-        )
-        # `open` builtin nao fica em pipeline_tools.__dict__ — usamos
-        # builtins.open patch ao inves.
-        import builtins
-
-        monkeypatch.setattr(builtins, "open", tracking_open)
+        # Tanto pipeline_tools.os.fdopen quanto os.fdopen direto devem ser
+        # patcheados — o helper `_open_redirect_target` faz `os.fdopen(fd, ...)`.
+        monkeypatch.setattr(pipeline_tools.os, "fdopen", tracking_fdopen)
 
         with pytest.raises(ValueError, match="fora do workspace"):
             pipeline_tools._open_redirect_files({
@@ -105,7 +104,7 @@ class TestOpenRedirectFiles:
                 "stderr": "/etc/passwd",              # falha
             })
 
-        # O handle de ok.txt foi aberto E fechado
+        # O handle de ok.txt foi aberto E fechado.
         assert len(opened_handles) >= 1
         for fh in opened_handles:
             assert fh.closed, f"FD vazado: {fh!r} ainda aberto"
@@ -136,3 +135,12 @@ class TestRedirectFunctionStructure:
         assert "try:" in src
         assert "except Exception:" in src
         assert "fh.close()" in src
+
+    def test_function_uses_o_nofollow(self):
+        """#D117: `_open_redirect_target` usa O_NOFOLLOW para fechar TOCTOU."""
+        import inspect
+        from alpha.tools import pipeline_tools
+
+        src = inspect.getsource(pipeline_tools._open_redirect_target)
+        assert "O_NOFOLLOW" in src
+        assert "os.open" in src or "os.fdopen" in src

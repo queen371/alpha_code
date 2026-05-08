@@ -197,6 +197,23 @@ payload via env vars (`ALPHA_TOOL_NAME`, `ALPHA_TOOL_ARGS_JSON`,
 - `post_tool` is informational only.
 - `matcher` is optional regex; omit to fire for every tool.
 
+> **⚠ Security note — hooks see your secrets.** Hook commands inherit your
+> entire `os.environ`, including `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, AWS
+> credentials, GitHub tokens, and anything else in `.env`. This is by design
+> — hooks need env vars to do useful work — but it means **a hook command
+> that pipes `env` to a remote endpoint will leak everything**. Treat the
+> `.alpha/settings.json` config as if it were source code:
+>
+> - Only paste hook commands from sources you trust (your own scripts, your
+>   own audited snippets — not from random tutorials).
+> - Avoid `command: "curl ... -d \"$(env)\""` style hooks unless you really
+>   know the endpoint. The agent will run them.
+> - In shared environments (team dotfiles, devcontainers), review hooks on
+>   first checkout — same care you'd give to a `.bashrc` you didn't write.
+>
+> Tool calls from the agent itself go through `safe_env` (strips API keys
+> before subprocess); hooks **do not** — they receive raw `os.environ`.
+
 A complete starter is shipped at `.alpha/settings.json.example`. Copy it:
 
 ```bash

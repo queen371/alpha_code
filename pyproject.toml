@@ -3,41 +3,47 @@ name = "alpha-code"
 version = "1.0.0"
 description = "Alpha Code — Standalone terminal agent"
 requires-python = ">=3.11"
+# DEEP_SECURITY #036: upper bounds em todas as deps. Sem cap, `pip install -U`
+# pode puxar uma major release com breaking changes ou CVE recem-introduzido
+# antes de termos chance de auditar. Cap por major + 1 segue o padrao de
+# semver-aware constraints (ex: `httpx>=0.27,<2.0` = "qualquer 0.x ou 1.x ate
+# 2.0 exclusivo"). Aliado ao lockfile (`requirements.lock`) que pin exato.
 dependencies = [
-    "httpx>=0.27",
-    "python-dotenv>=1.0",
-    "ddgs>=9.0",
-    "pyyaml>=6.0",
-    "prompt_toolkit>=3.0",
+    "httpx>=0.27,<1.0",
+    "python-dotenv>=1.0,<2.0",
+    "ddgs>=9.0,<10.0",
+    "pyyaml>=6.0,<7.0",
+    "prompt_toolkit>=3.0,<4.0",
     # Pin transitive: lxml < 6.1.0 e vulneravel a CVE-2026-41066 (XXE/local file read)
-    "lxml>=6.1.0",
+    "lxml>=6.1.0,<7.0",
 ]
 
 [project.optional-dependencies]
 browser = [
-    "playwright>=1.40",
+    "playwright>=1.40,<2.0",
 ]
 network = [
     # http_request usa aiohttp lazy-import; sem isso o tool retorna ImportError
-    "aiohttp>=3.9",
+    "aiohttp>=3.9,<4.0",
 ]
 database = [
     # query_database/list_tables/describe_table para PostgreSQL
-    "asyncpg>=0.29",
+    "asyncpg>=0.29,<1.0",
 ]
 web = [
     # extract_page_content (web_search) usa trafilatura como extrator primario
-    "trafilatura>=1.6",
+    "trafilatura>=1.6,<3.0",
 ]
 all = [
     "alpha-code[browser,network,database,web,dev]",
 ]
 dev = [
-    # #025/#026 (SEC V1.1): pin >= 9.0.3 quando upstream cortar release
-    # com fix de CVE-2026-XXXX (pytest). Hoje suite roda em 9.0.2 — quando
-    # 9.0.3 sair, `pip install -e .[dev] --upgrade` puxa automaticamente.
-    "pytest>=9.0.2",
-    "pytest-asyncio>=0.24",
+    # AUDIT_V1.2 #010: pytest 9.0.2 vulneravel a CVE-2025-71176 (fix em 9.0.3).
+    # Pinned `>=9.0.3` para forcar upgrade no proximo `pip install -e .[dev]`.
+    "pytest>=9.0.3,<10.0",
+    "pytest-asyncio>=0.24,<2.0",
+    # pip-audit pra detectar CVEs em CI / pre-release (#036).
+    "pip-audit>=2.7,<3.0",
 ]
 
 [project.scripts]

@@ -36,12 +36,29 @@ def _ensure_dir() -> Path:
     Perms 0o700: session files contem tool results (read_file de .env,
     output de execute_shell, query_database rows) e [CWD] do user. Em
     hosts compartilhados, deixar group/other-readable e leak.
+
+    DEEP_SECURITY V3.0 #D113: o `_atomic_write` so chmoda arquivos quando
+    sao escritos. Sessoes pre-fix #D109 (criadas com umask 022 → 0o644)
+    permanecem world/group-readable indefinidamente. Defense-in-depth:
+    a cada start, varremos os filhos *.json e elevamos perms para 0o600.
+    Idempotente, barato (max ~50 arquivos por _MAX_SESSIONS), so faz
+    chmod quando ja diverge — evita stat-thrash em hosts saudaveis.
     """
     _HISTORY_DIR.mkdir(parents=True, exist_ok=True)
     try:
         os.chmod(_HISTORY_DIR, 0o700)
     except OSError:
         pass
+    # Migra sessoes legadas para 0o600. Erros sao silenciados — pode ser
+    # arquivo de outro usuario (em hosts compartilhados), filesystem r/o,
+    # ou inode estranho. Logamos em debug, nao queremos derrubar startup.
+    for child in _HISTORY_DIR.glob("*.json"):
+        try:
+            cur = child.stat().st_mode & 0o777
+            if cur != 0o600:
+                os.chmod(child, 0o600)
+        except OSError as exc:
+            logger.debug("history: skip chmod legacy %s: %s", child.name, exc)
     return _HISTORY_DIR
 
 

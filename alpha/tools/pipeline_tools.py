@@ -8,11 +8,13 @@ SECURITY: Each pipeline stage is validated. Hard-blocked patterns checked on ful
 
 import asyncio
 import logging
+import os
 import re
 import shlex
 from pathlib import Path
 
 from . import ToolDefinition, ToolSafety, register_tool
+from .path_helpers import _validate_path_no_symlink
 from .safe_env import get_safe_env
 from .shell_tools import HARD_BLOCKED_RE
 from .workspace import AGENT_WORKSPACE
@@ -110,6 +112,40 @@ def _parse_segment(segment: str) -> tuple[list[str], dict[str, str]]:
     return parts, redirects
 
 
+# AUDIT_V1.2 #003 + DEEP_SECURITY V3.0 #D117: O_NOFOLLOW previne TOCTOU
+# symlink. Janela de ataque do bug original: entre `Path(t).resolve()`
+# (que segue symlinks ate alvo, ok no workspace) e `open(target_path, "w")`
+# (que abre por nome — atacante local pode trocar o path por symlink
+# apontando pra fora do workspace nessa janela). Mesma fix aplicada em
+# `file_tools._write_file/_edit_file` apos #017 V1.1.
+_REDIRECT_OPEN_FLAGS = {
+    "stdout":         os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+    "stdout_append":  os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+    "stderr":         os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+    "stderr_append":  os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+    "stdin":          os.O_RDONLY,
+}
+_REDIRECT_FDOPEN_MODE = {
+    "stdout": "w", "stdout_append": "a",
+    "stderr": "w", "stderr_append": "a",
+    "stdin":  "r",
+}
+
+
+def _open_redirect_target(key: str, target_path: Path):
+    """Abre um redirect target com O_NOFOLLOW.
+
+    `O_NOFOLLOW` (Linux/macOS) faz o open() falhar com `OSError(ELOOP)` se
+    o path e um symlink. Em Windows o flag nao existe — caimos no `open()`
+    builtin (sem proteccao TOCTOU, mas Windows nao e plataforma alvo).
+    """
+    flags = _REDIRECT_OPEN_FLAGS[key]
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(str(target_path), flags, 0o644)
+    return os.fdopen(fd, _REDIRECT_FDOPEN_MODE[key])
+
+
 def _open_redirect_files(redirects: dict[str, str]) -> dict:
     """Abre file handles para redirects. Valida contra workspace.
 
@@ -120,28 +156,70 @@ def _open_redirect_files(redirects: dict[str, str]) -> dict:
     o open acontece num try/except que fecha handles ja abertos antes
     de re-raise, mantendo o invariante "ou retorna tudo aberto, ou nao
     deixa fd vazado".
+
+    AUDIT_V1.2 #003 + DEEP_SECURITY V3.0 #D117: usa `os.open(O_NOFOLLOW)`
+    em vez de `open()` para fechar TOCTOU symlink. Atacante que conseguir
+    trocar o path por symlink entre `relative_to()` e o `open` recebe
+    `OSError(ELOOP)` em vez de escrever no destino do symlink.
     """
     handles: dict = {}
     try:
         for key, target in redirects.items():
-            target_path = Path(target).expanduser().resolve()
+            # Validacao de path: rejeita symlinks no raw input E em parents
+            # ANTES do open. Mesmo helper usado por write_file/edit_file. Para
+            # paths inexistentes (caso comum em redirect `> new.txt`) cai no
+            # fallback manual de workspace check.
+            raw = Path(target).expanduser()
+            if not raw.is_absolute():
+                raw = AGENT_WORKSPACE / raw
             try:
-                target_path.relative_to(AGENT_WORKSPACE)
-            except ValueError:
-                raise ValueError(
-                    f"Redirect '{target}' fora do workspace ({AGENT_WORKSPACE})"
-                )
+                if raw.exists():
+                    target_path = _validate_path_no_symlink(str(raw))
+                else:
+                    # Path nao existe ainda: validar parents e logical containment.
+                    # `os.path.normpath` colapsa `..` puramente textualmente
+                    # (sem touch FS), evitando bypass `cmd > ../../etc/passwd`.
+                    import os.path as _osp
+                    norm = Path(_osp.normpath(str(raw)))
+                    try:
+                        norm.relative_to(AGENT_WORKSPACE)
+                    except ValueError:
+                        raise PermissionError(
+                            f"Redirect '{target}' fora do workspace "
+                            f"({AGENT_WORKSPACE})"
+                        )
+                    # Walk parents existentes — qualquer symlink no caminho
+                    # ate a raiz seria explorado pelo open.
+                    cur = norm.parent
+                    while cur != cur.parent and not cur.exists():
+                        cur = cur.parent
+                    walk = cur
+                    while walk != walk.parent:
+                        if walk.is_symlink():
+                            raise PermissionError(
+                                f"Redirect '{target}' tem componente symlink "
+                                f"({walk}) — bloqueado por seguranca"
+                            )
+                        walk = walk.parent
+                    target_path = norm
+            except PermissionError as exc:
+                # PermissionError -> ValueError pra manter semantica do caller
+                # (que faz `except (ValueError, ...)`).
+                raise ValueError(str(exc)) from exc
 
-            if key == "stdout":
-                handles["stdout"] = open(target_path, "w")
-            elif key == "stdout_append":
-                handles["stdout"] = open(target_path, "a")
-            elif key == "stderr":
-                handles["stderr"] = open(target_path, "w")
-            elif key == "stderr_append":
-                handles["stderr"] = open(target_path, "a")
-            elif key == "stdin":
-                handles["stdin"] = open(target_path)
+            try:
+                handles[_REDIRECT_KEY_TO_HANDLE[key]] = _open_redirect_target(
+                    key, target_path
+                )
+            except OSError as exc:
+                # ELOOP (errno 40 em Linux) = path era symlink criado entre
+                # validacao e open (TOCTOU race). Erro de validacao, nao
+                # runtime — mensagem explicita.
+                if exc.errno == 40:
+                    raise ValueError(
+                        f"Redirect '{target}' e symlink — bloqueado por seguranca"
+                    ) from exc
+                raise
     except Exception:
         # Cleanup parcial: fecha tudo o que conseguimos abrir antes do erro.
         # Engole erros de close (handle ja invalido / disco quebrado) — o
@@ -153,6 +231,16 @@ def _open_redirect_files(redirects: dict[str, str]) -> dict:
                 pass
         raise
     return handles
+
+
+# Mapeia o key parseado pra chave que o caller usa em subprocess_exec.
+# stdout_append / stderr_append viram "stdout" / "stderr" porque o flag
+# `O_APPEND` ja foi escolhido na hora do open.
+_REDIRECT_KEY_TO_HANDLE = {
+    "stdout": "stdout", "stdout_append": "stdout",
+    "stderr": "stderr", "stderr_append": "stderr",
+    "stdin":  "stdin",
+}
 
 
 async def _execute_pipe_chain(

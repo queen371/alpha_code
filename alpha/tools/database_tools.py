@@ -10,11 +10,15 @@ import asyncio
 import logging
 import re
 import sqlite3
+import ssl as _ssl
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
 from .._security_log import sanitize_for_log
-from ..net_utils import is_private_ip as _is_private_ip
+from ..net_utils import (
+    is_private_ip as _is_private_ip,
+    resolve_and_validate as _resolve_and_validate,
+)
 from . import ToolDefinition, ToolSafety, register_tool
 from .workspace import AGENT_WORKSPACE
 
@@ -45,8 +49,43 @@ def _get_pg_pools_lock() -> asyncio.Lock:
     return _pg_pools_lock
 
 
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", ""})
+
+
+def _build_pg_ssl_context(connection: str) -> "_ssl.SSLContext | bool":
+    """SSL context para asyncpg.create_pool.
+
+    DEEP_SECURITY V3.0 #D114: asyncpg defaulta para `sslmode=prefer`
+    (aceita plaintext se o servidor nao oferecer TLS). Em conexoes
+    remotas isso e MITM-able. Forcamos TLS via `create_default_context()`
+    quando o destino nao for loopback. Loopback (`localhost`/`127.0.0.1`)
+    fica permissivo — devs locais raramente tem TLS no PG dev.
+    Opt-out via `sslmode=disable` na connection string (loga warning).
+    """
+    parsed = urlparse(connection)
+    host = (parsed.hostname or "").lower()
+    if host in _LOOPBACK_HOSTS:
+        return False  # plaintext OK em loopback
+    if "sslmode=disable" in connection.lower():
+        logger.warning(
+            "PostgreSQL connection com sslmode=disable em host remoto (%s) — "
+            "MITM possivel. Use sslmode=require em producao.", host,
+        )
+        return False
+    return _ssl.create_default_context()
+
+
 async def _get_pg_pool(connection: str):
-    """Lazy-init pool por connection string."""
+    """Lazy-init pool por connection string.
+
+    AUDIT_V1.2 #015 (DNS rebinding): a versao antiga passava `connection` cru
+    para asyncpg, que re-resolvia o hostname com DNS — janela onde atacante
+    com TTL=0 podia retornar IP publico no primeiro check (`_is_private_ip`)
+    e IP privado (e.g. `169.254.169.254` cloud metadata) no connect real.
+    Agora resolvemos hostname uma vez via `_resolve_and_validate` e passamos
+    `host=hostname` (cert SAN/SNI matcham) + `hostaddr=ip` (asyncpg conecta
+    no IP, sem nova resolucao). Cobre tambem #D114 com `_build_pg_ssl_context`.
+    """
     pool = _pg_pools.get(connection)
     if pool is not None:
         return pool
@@ -54,9 +93,39 @@ async def _get_pg_pool(connection: str):
         pool = _pg_pools.get(connection)
         if pool is None:
             import asyncpg
-            pool = await asyncpg.create_pool(
-                connection, min_size=1, max_size=5, command_timeout=30,
-            )
+            parsed = urlparse(connection)
+            hostname = parsed.hostname or ""
+            ssl_ctx = _build_pg_ssl_context(connection)
+
+            # Loopback nao precisa de IP-pinning (sem rebinding window real).
+            # Para hosts remotos, pin do IP previne rebinding no connect.
+            kwargs: dict = {
+                "min_size": 1,
+                "max_size": 5,
+                "command_timeout": 30,
+                "ssl": ssl_ctx,
+            }
+            if hostname.lower() in _LOOPBACK_HOSTS:
+                pool = await asyncpg.create_pool(connection, **kwargs)
+            else:
+                # `_resolve_and_validate` retorna IP publico apos validar
+                # SSRF; raise ValueError se privado/falha. A SSRF check ja
+                # rodou em `_validate_pg_ssrf` (caller) — aqui re-resolvemos
+                # explicitamente para PINAR o IP que asyncpg usara, evitando
+                # nova resolucao DNS no connect.
+                ip = await _resolve_and_validate(hostname)
+                # Reconstroi kwargs no formato keyword (asyncpg aceita
+                # connection string + overrides; passar host/hostaddr
+                # como kwargs sobrepoe os derivados do dsn).
+                pool = await asyncpg.create_pool(
+                    host=hostname,
+                    hostaddr=ip,
+                    port=parsed.port or 5432,
+                    user=parsed.username,
+                    password=parsed.password,
+                    database=(parsed.path or "/").lstrip("/") or None,
+                    **kwargs,
+                )
             _pg_pools[connection] = pool
     return pool
 
