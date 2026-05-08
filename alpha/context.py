@@ -25,11 +25,20 @@ CHARS_PER_TOKEN = 4
 # so the compression trigger fires before the model's real budget is hit.
 IMAGE_TOKEN_COST = 1500
 
+import contextvars  # noqa: E402 — keep grouped with the failure counter
+
 # Quantos retries de LLM-based compression antes de cair em truncacao crua.
 # >= este numero de empty-summary consecutivos -> hard truncate respeitando
 # tuplas assistant->tool. Reset quando uma compressao tem sucesso.
 _COMPRESS_FAIL_TRUNCATE_THRESHOLD = 2
-_compress_consecutive_failures = 0
+
+# Antes era um global int. Bug: parent + sub-agents compartilhavam o counter
+# no mesmo processo. Uma falha num sub-agent consumia o budget do parent —
+# atingido o threshold, *todos* caiam em hard_truncate na proxima tentativa.
+# ContextVar isola por contexto async; cada agent loop ve seu proprio valor.
+_compress_consecutive_failures: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "alpha_compress_consecutive_failures", default=0
+)
 
 # Context window sizes per provider (conservative estimates leaving room for response)
 PROVIDER_CONTEXT_LIMITS: dict[str, int] = {
@@ -302,7 +311,6 @@ async def compress_context(
     ]
 
     # Call LLM without tools for summarization
-    global _compress_consecutive_failures
     summary = ""
     try:
         async for event in stream_fn(compression_messages, [], 0.2, provider=provider):
@@ -316,10 +324,11 @@ async def compress_context(
         summary = ""
 
     if not summary:
-        _compress_consecutive_failures += 1
-        if _compress_consecutive_failures >= _COMPRESS_FAIL_TRUNCATE_THRESHOLD:
+        failures = _compress_consecutive_failures.get() + 1
+        _compress_consecutive_failures.set(failures)
+        if failures >= _COMPRESS_FAIL_TRUNCATE_THRESHOLD:
             logger.warning(
-                f"Compression failed {_compress_consecutive_failures}x "
+                f"Compression failed {failures}x "
                 "consecutive — falling back to hard truncation"
             )
             new_messages = _hard_truncate(messages, start, end)
@@ -332,13 +341,12 @@ async def compress_context(
             return messages
         logger.warning(
             f"Compression produced empty summary — skipping "
-            f"(failure {_compress_consecutive_failures}/"
-            f"{_COMPRESS_FAIL_TRUNCATE_THRESHOLD})"
+            f"(failure {failures}/{_COMPRESS_FAIL_TRUNCATE_THRESHOLD})"
         )
         return messages
 
     # Reset failure counter on successful summary
-    _compress_consecutive_failures = 0
+    _compress_consecutive_failures.set(0)
 
     # Replace compressed messages with a single summary message
     summary_message = {

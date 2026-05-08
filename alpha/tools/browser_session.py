@@ -35,7 +35,13 @@ class BrowserSession:
     """Singleton Playwright session reused across tool calls."""
 
     _instance: "BrowserSession | None" = None
-    _lock = asyncio.Lock()
+    # Lock criado lazy. Antes era `_lock = asyncio.Lock()` no escopo da
+    # classe (avaliado no module-load), atrelando-se ao primeiro event
+    # loop que tocasse o atributo. O CLI roda asyncio.run() por turn —
+    # loop novo cada vez — disparando `RuntimeError: attached to a
+    # different loop` na 2a turn. Mesmo padrao de alpha/llm.py.
+    _lock: "asyncio.Lock | None" = None
+    _lock_loop: object | None = None
 
     def __init__(self):
         self.playwright: "Playwright | None" = None
@@ -44,6 +50,14 @@ class BrowserSession:
         self.pages: list = []
         self.active_idx: int = 0
         self.headless: bool = True
+
+    @classmethod
+    def _get_lock(cls) -> asyncio.Lock:
+        loop = asyncio.get_running_loop()
+        if cls._lock is None or cls._lock_loop is not loop:
+            cls._lock = asyncio.Lock()
+            cls._lock_loop = loop
+        return cls._lock
 
     @classmethod
     async def get(cls) -> "BrowserSession":
@@ -63,7 +77,7 @@ class BrowserSession:
         return self.browser is not None and self.browser.is_connected()
 
     async def open(self, headless: bool = True) -> None:
-        async with self._lock:
+        async with self._get_lock():
             if self.is_open():
                 return
             if not PLAYWRIGHT_AVAILABLE:
@@ -104,7 +118,7 @@ class BrowserSession:
             self.pages.append(page)
 
     async def close(self) -> None:
-        async with self._lock:
+        async with self._get_lock():
             # #065: remover listener `_on_new_page` antes de fechar o
             # context. Sem isto, mesmo apos browser.close, o callback
             # mantinha referencia para `self` enquanto Playwright runtime

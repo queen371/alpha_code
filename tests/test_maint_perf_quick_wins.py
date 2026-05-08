@@ -153,17 +153,9 @@ class TestSafeGetToolCommentUpdated:
 
 
 # ─── #093 — analyze_tools docstring ────────────────────────────────
-
-
-class TestAnalyzeToolsDocstring:
-    def test_module_has_docstring(self):
-        analyze_path = Path(__file__).parent.parent / "analyze_tools.py"
-        text = analyze_path.read_text(encoding="utf-8")
-        # Procura por docstring nas primeiras 10 linhas
-        first_lines = text.splitlines()[:10]
-        joined = "\n".join(first_lines)
-        assert '"""' in joined
-        assert "tools" in joined.lower()
+# Removido: `analyze_tools.py` foi apagado (script ad-hoc da raiz que
+# nao era importado nem listado em pyproject.toml; lixo de fase de
+# desenvolvimento).
 
 
 # ─── #094 — bin/alpha message ──────────────────────────────────────
@@ -187,8 +179,15 @@ class TestLimitsDict:
         from alpha.config import LIMITS
 
         assert "max_iterations" in LIMITS
-        assert "subagent_max_iterations" in LIMITS
         assert LIMITS["max_iterations"] == 50
+
+    def test_subagent_max_iterations_lives_in_features_only(self):
+        # `subagent_max_iterations` antes existia tambem em LIMITS, mas nada
+        # lia de la — codigo le sempre de FEATURES (vide delegate_tools.py).
+        # Manter dois lugares era drift garantido.
+        from alpha.config import FEATURES, LIMITS
+        assert "subagent_max_iterations" not in LIMITS
+        assert "subagent_max_iterations" in FEATURES
 
     def test_legacy_aliases_match(self):
         from alpha.config import LIMITS, LLM_TIMEOUT, MAX_ITERATIONS, TOOL_RESULT_MAX_CHARS

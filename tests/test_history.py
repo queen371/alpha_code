@@ -5,7 +5,15 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from alpha.history import generate_session_id, list_sessions, load_session, save_session
+from alpha.history import (
+    InvalidSessionId,
+    _session_path,
+    generate_session_id,
+    list_sessions,
+    load_session,
+    load_session_summary,
+    save_session,
+)
 
 
 class TestHistory:
@@ -93,3 +101,50 @@ class TestHistory:
         path = Path(self.tmpdir) / "test_meta.json"
         data = json.loads(path.read_text())
         assert data["metadata"]["provider"] == "grok"
+
+
+class TestSessionIdValidation:
+    """Path-traversal guard on session_id (regression for /load <id>)."""
+
+    def setup_method(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self._patcher = patch("alpha.history._HISTORY_DIR", Path(self.tmpdir))
+        self._patcher.start()
+
+    def teardown_method(self):
+        self._patcher.stop()
+
+    def test_traversal_id_rejected_by_session_path(self):
+        import pytest
+        for bad in ("../etc/passwd", "../../etc/passwd", "a/b",
+                    "a\\b", " ../foo", "id with space"):
+            with pytest.raises(InvalidSessionId):
+                _session_path(bad)
+
+    def test_dot_only_id_rejected(self):
+        import pytest
+        for bad in ("", ".", "..", "...", ".hidden"):
+            with pytest.raises(InvalidSessionId):
+                _session_path(bad)
+
+    def test_valid_ids_accepted(self):
+        # Real ids from generate_session_id + simple alphanum/hyphen/underscore.
+        for good in ("20260507_153045_abcdef12", "test_001", "ABC-123",
+                     generate_session_id()):
+            p = _session_path(good)
+            assert p.suffix == ".json"
+            assert p.is_relative_to(Path(self.tmpdir).resolve())
+
+    def test_load_session_returns_none_for_traversal(self):
+        # Public API must not raise — REPL `/load ../x` should fail soft.
+        assert load_session("../etc/passwd") is None
+        assert load_session_summary("../etc/passwd") is None
+
+    def test_save_session_refuses_traversal_silently(self):
+        # save_session swallows the error and logs (consistent with the
+        # OSError-on-disk-full handler). The malicious file must NOT be
+        # created anywhere.
+        save_session("../leaked", [{"role": "user", "content": "x"}])
+        # Nothing under tmpdir, and nothing one level above either.
+        assert not list(Path(self.tmpdir).rglob("*leaked*"))
+        assert not (Path(self.tmpdir).parent / "leaked.json").exists()

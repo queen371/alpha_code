@@ -27,7 +27,22 @@ _MAX_RESULT_CHARS = 15000
 # faz handshake TCP+TLS+auth (~150-500ms remoto); cada describe_table/query
 # abria conexao nova. Pool reusa, drop em sessao termina.
 _pg_pools: dict = {}
-_pg_pools_lock = asyncio.Lock()
+# Lock criado lazy, atrelado ao loop ativo. Antes era criado no module-load:
+# o CLI roda asyncio.run() por turn (loop novo a cada call), enquanto o
+# modulo permanece em cache de imports — na 2a turn a Lock pertencia a um
+# loop fechado e disparava `RuntimeError: attached to a different loop`.
+# Padrao igual ao usado em alpha/llm.py:_get_shared_llm_client.
+_pg_pools_lock: asyncio.Lock | None = None
+_pg_pools_lock_loop: object | None = None
+
+
+def _get_pg_pools_lock() -> asyncio.Lock:
+    global _pg_pools_lock, _pg_pools_lock_loop
+    loop = asyncio.get_running_loop()
+    if _pg_pools_lock is None or _pg_pools_lock_loop is not loop:
+        _pg_pools_lock = asyncio.Lock()
+        _pg_pools_lock_loop = loop
+    return _pg_pools_lock
 
 
 async def _get_pg_pool(connection: str):
@@ -35,7 +50,7 @@ async def _get_pg_pool(connection: str):
     pool = _pg_pools.get(connection)
     if pool is not None:
         return pool
-    async with _pg_pools_lock:
+    async with _get_pg_pools_lock():
         pool = _pg_pools.get(connection)
         if pool is None:
             import asyncpg

@@ -100,6 +100,108 @@ async def _list_directory(path: str = ".") -> dict:
 MAX_REGEX_PATTERN_LENGTH = 500
 
 
+# Quantifier characters that, applied to a group, make ReDoS-prone shapes.
+_QUANTIFIER_CHARS = ("*", "+", "?", "}")
+
+
+def _detect_redos_pattern(pattern: str) -> str | None:
+    """Best-effort static check for catastrophic-backtracking shapes.
+
+    Returns a short reason string if the pattern matches a known ReDoS
+    shape, else ``None``. Catches the cases the old subprocess timeout
+    actually rejected in practice:
+
+    - Nested quantifier on a group: ``(...)+`` / ``(...)*`` followed by
+      another quantifier (``(a+)+``, ``(.*)+``, ``(.+)*``).
+    - Star inside star: ``(.*)*``, ``(a*)*``.
+    - Alternation with overlapping branches under a quantifier:
+      ``(a|a)+``, ``(\\w|\\w+)+`` — heuristic, not exhaustive.
+
+    Not a full regex parser — by design. We only look for shapes that
+    are almost always ReDoS in practice; the search engine itself
+    enforces a hard length cap (`MAX_REGEX_PATTERN_LENGTH`) above this.
+    """
+    # 1) `(...)<q1><q2>` where both q1 and q2 are quantifiers (e.g. `)*+`)
+    #    or `)+*`. Also `){n,m}*` etc.
+    i = 0
+    depth = 0
+    last_close: int | None = None
+    while i < len(pattern):
+        ch = pattern[i]
+        if ch == "\\" and i + 1 < len(pattern):
+            i += 2
+            continue
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            last_close = i
+        elif ch in _QUANTIFIER_CHARS and last_close is not None and i == last_close + 1:
+            # The just-closed group is now quantified. Look at the next char.
+            if i + 1 < len(pattern) and pattern[i + 1] in _QUANTIFIER_CHARS:
+                return "quantifier-on-quantified-group"
+            # Look inside the just-closed group for an unbounded quantifier
+            # (`*`, `+`, `{n,}`). Scan back to the matching `(`.
+            open_pos = _matching_open_paren(pattern, last_close)
+            if open_pos is not None and _has_unbounded_quantifier(
+                pattern[open_pos + 1: last_close]
+            ):
+                # `(.*)+`, `(a+)*`, `(\w+)+` etc. — outer quantifier is `+`/`*`?
+                if ch in ("+", "*"):
+                    return "nested unbounded quantifiers"
+            last_close = None
+        else:
+            last_close = None
+        i += 1
+
+    # 2) Alternation with duplicate single-char branches under a quantifier:
+    #    `(a|a)+`, `(x|x)*`. Cheap pattern: `\((.)\|\1\)[+*]`.
+    if re.search(r"\((.)\|\1\)[+*]", pattern):
+        return "duplicate-branch alternation under quantifier"
+
+    return None
+
+
+def _matching_open_paren(pattern: str, close_idx: int) -> int | None:
+    """Return the index of the `(` matching `pattern[close_idx]`, or None."""
+    depth = 0
+    i = close_idx
+    while i >= 0:
+        ch = pattern[i]
+        if i > 0 and pattern[i - 1] == "\\":
+            i -= 2
+            continue
+        if ch == ")":
+            depth += 1
+        elif ch == "(":
+            depth -= 1
+            if depth == 0:
+                return i
+        i -= 1
+    return None
+
+
+def _has_unbounded_quantifier(s: str) -> bool:
+    """True if ``s`` contains an unescaped `*`, `+`, or `{n,}` quantifier."""
+    i = 0
+    while i < len(s):
+        if s[i] == "\\" and i + 1 < len(s):
+            i += 2
+            continue
+        if s[i] in ("*", "+"):
+            return True
+        if s[i] == "{":
+            # `{n,}` (no upper bound) is unbounded; `{n,m}` is bounded.
+            close = s.find("}", i)
+            if close != -1 and "," in s[i:close] and not s[i:close].rstrip("}").rstrip().endswith(","):
+                # `{n,m}` — bounded
+                pass
+            elif close != -1 and "," in s[i:close]:
+                return True
+        i += 1
+    return False
+
+
 async def _search_files(pattern: str, path: str = ".", max_results: int = 50) -> dict:
     """Search for a text pattern inside files (grep-like)."""
     if len(pattern) > MAX_REGEX_PATTERN_LENGTH:
@@ -117,29 +219,20 @@ async def _search_files(pattern: str, path: str = ".", max_results: int = 50) ->
     except re.error as e:
         return {"error": f"Regex inválido: {e}"}
 
-    # Validate regex complexity in a subprocess so the timeout funciona em
-    # qualquer thread (sub-agent, parallel) e em Windows. SIGALRM so funciona
-    # na main thread em POSIX, e nao existe em Windows.
-    import sys
-    validator_code = (
-        "import re,sys;"
-        f"re.compile({pattern!r}, re.IGNORECASE).search('a'*1000)"
-    )
-    proc = await asyncio.create_subprocess_exec(
-        sys.executable, "-c", validator_code,
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.DEVNULL,
-    )
-    try:
-        await asyncio.wait_for(proc.wait(), timeout=1.0)
-    except asyncio.TimeoutError:
-        proc.kill()
-        try:
-            await proc.wait()
-        except Exception:
-            pass
+    # Static ReDoS heuristic — replaces the old `subprocess.run([sys.executable,
+    # "-c", ...])` validator that cost 30-100ms per call. The subprocess
+    # approach existed to get a portable timeout, but it shipped a Python
+    # interpreter just to compile + try-match a regex. The heuristic below
+    # rejects the well-known ReDoS shapes (nested quantifiers on groups)
+    # which is what the timeout caught in practice — we now reject
+    # statically in microseconds.
+    redos_reason = _detect_redos_pattern(pattern)
+    if redos_reason:
         return {
-            "error": "Regex muito complexo (possível backtracking exponencial). Simplifique o padrão."
+            "error": (
+                "Regex muito complexo (possível backtracking exponencial — "
+                f"{redos_reason}). Simplifique o padrão."
+            )
         }
 
     # #025/#071: ripgrep quando disponivel — 10-50x mais rapido em projetos
