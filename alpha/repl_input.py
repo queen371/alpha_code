@@ -21,6 +21,7 @@ import tempfile
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.key_binding import KeyBindings
 
@@ -105,13 +106,74 @@ def _resolve_placeholders(text: str, attached: dict[int, Path]) -> tuple[str, li
     return text, paths
 
 
+_BUILTIN_COMMANDS: list[tuple[str, str]] = [
+    ("/clear", "Clear history and screen"),
+    ("/history", "Show conversation history"),
+    ("/save", "Save current session"),
+    ("/load", "Load a previous session"),
+    ("/continue", "Resume from last session"),
+    ("/sessions", "List saved sessions"),
+    ("/tools", "List available tools"),
+    ("/skills", "List registered skills (ready vs inactive)"),
+    ("/mcp", "List connected MCP servers"),
+    ("/image", "Attach an image (Ctrl+V also works)"),
+    ("/agents", "List named agents"),
+    ("/agent", "Show/switch active agent"),
+    ("/model", "Show/switch provider & model"),
+    ("/help", "Show all commands"),
+    ("/exit", "Exit"),
+]
+
+
+class _SlashCompleter(Completer):
+    """Autocomplete for ``/command`` and ``/<skill-name>``.
+
+    Triggers only when the line is a single slash-token with no whitespace
+    yet — that's the only place where typing a name matters. Once the user
+    hits space, completion stops so it doesn't compete with normal text.
+    """
+
+    def get_completions(self, document, complete_event):
+        line = document.text_before_cursor
+        if not line.startswith("/") or " " in line:
+            return
+
+        for cmd, desc in _BUILTIN_COMMANDS:
+            if cmd.startswith(line):
+                yield Completion(
+                    cmd,
+                    start_position=-len(line),
+                    display_meta=desc,
+                )
+
+        # Skills are imported lazily so this module stays import-cheap and
+        # doesn't pull the registry at definition time.
+        try:
+            from .skills import list_skills
+            for s in list_skills():
+                cmd = f"/{s.name}"
+                if cmd.startswith(line):
+                    meta = (s.description or "").strip().split("\n", 1)[0]
+                    yield Completion(
+                        cmd,
+                        start_position=-len(line),
+                        display_meta=meta[:80] or "skill",
+                    )
+        except Exception:
+            # Never break input on a skill-registry hiccup.
+            return
+
+
 _SESSION: PromptSession | None = None
 
 
 def _get_session() -> PromptSession:
     global _SESSION
     if _SESSION is None:
-        _SESSION = PromptSession()
+        _SESSION = PromptSession(
+            completer=_SlashCompleter(),
+            complete_while_typing=True,
+        )
     return _SESSION
 
 

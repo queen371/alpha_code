@@ -55,3 +55,6 @@ lab-recorder/
 
 # Internal security/code audits — kept local only
 docs/audits/
+
+# Backup of .git/ (local snapshot before risky operations)
+.git.backup/

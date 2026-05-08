@@ -14,6 +14,7 @@ import atexit
 import json
 import logging
 import os
+import shutil
 import sys
 import textwrap
 from pathlib import Path
@@ -33,7 +34,7 @@ from alpha.mcp import (
     load_mcp_servers,
     shutdown_mcp_servers,
 )
-from alpha.skills import inject_skill_index, list_skills, load_all_skills
+from alpha.skills import get_skill, inject_skill_index, list_skills, load_all_skills
 from alpha.display import (
     C,
     ThinkingIndicator,
@@ -513,6 +514,39 @@ def run_repl(provider: str, temperature: float):
             elif cmd == "/tools":
                 print_tools_list(tools)
                 continue
+            elif cmd == "/skills":
+                skills = sorted(list_skills(), key=lambda s: s.name)
+                if not skills:
+                    print(c(C.GRAY, "  No skills registered."))
+                    continue
+                # Group by availability so the user sees what's invokable now
+                # vs. what needs a binary install.
+                ready: list = []
+                inactive: list = []
+                for s in skills:
+                    missing = [b for b in s.requires_bins if not shutil.which(b)]
+                    (inactive if missing else ready).append((s, missing))
+                print(f"  {c(C.GRAY, f'{len(skills)} skills registered '
+                              f'({len(ready)} ready, {len(inactive)} inactive)')}")
+                print(f"  {c(C.GRAY, 'Invoke with /<skill-name> [args]')}")
+                print()
+                if ready:
+                    print(f"  {c(C.GREEN + C.BOLD, 'Ready')}")
+                    for s, _ in ready:
+                        desc = (s.description or "").strip().split("\n", 1)[0]
+                        print(
+                            f"  {c(C.GREEN, '✦')} {c(C.CYAN, s.name):<24} "
+                            f"{c(C.GRAY, desc[:90])}"
+                        )
+                    print()
+                if inactive:
+                    print(f"  {c(C.YELLOW + C.BOLD, 'Inactive (missing bins)')}")
+                    for s, missing in inactive:
+                        print(
+                            f"  {c(C.YELLOW, '○')} {c(C.GRAY, s.name):<24} "
+                            f"{c(C.GRAY, 'needs: ' + ', '.join(missing))}"
+                        )
+                continue
             elif cmd == "/image":
                 if len(parts) < 2:
                     print(f"  {c(C.GRAY, 'Usage: /image <path> [optional message]')}")
@@ -669,16 +703,54 @@ def run_repl(provider: str, temperature: float):
                 print(f"  {c(C.CYAN, '/continue')} — Resume from last session")
                 print(f"  {c(C.CYAN, '/sessions')} — List saved sessions")
                 print(f"  {c(C.CYAN, '/tools')}    — List available tools")
+                print(f"  {c(C.CYAN, '/skills')}   — List registered skills (ready vs inactive)")
                 print(f"  {c(C.CYAN, '/mcp')}      — List connected MCP servers")
                 print(f"  {c(C.CYAN, '/image')}    — Attach an image (Ctrl+V or Alt+V also works)")
                 print(f"  {c(C.CYAN, '/agents')}   — List named agents")
                 print(f"  {c(C.CYAN, '/agent')}    — Show/switch active agent")
                 print(f"  {c(C.CYAN, '/model')}    — Show/switch provider & model")
+                print(f"  {c(C.CYAN, '/<skill>')}  — Invoke a skill by name (e.g. /skill-creator)")
                 print(f"  {c(C.CYAN, '/exit')}     — Exit")
                 continue
             else:
-                print(c(C.GRAY, f"  Unknown command: {cmd}"))
-                continue
+                # Try resolving as a skill name (Claude-Code-style /<name>).
+                # If a skill matches, inline its body as a synthetic user
+                # prompt and fall through to the LLM call. Otherwise show
+                # an "unknown command" hint with the closest skill name.
+                skill_name = cmd[1:]
+                skill = get_skill(skill_name)
+                if skill is None:
+                    from difflib import get_close_matches
+                    suggestion = get_close_matches(
+                        skill_name, [s.name for s in list_skills()], n=1
+                    )
+                    hint = f" Did you mean /{suggestion[0]}?" if suggestion else ""
+                    print(c(C.GRAY, f"  Unknown command: {cmd}.{hint}"))
+                    continue
+
+                skill_args = (
+                    user_input.split(maxsplit=1)[1] if len(parts) > 1 else ""
+                )
+                missing = [b for b in skill.requires_bins if not shutil.which(b)]
+                if missing:
+                    print(
+                        f"  {c(C.YELLOW, '⚠')} Skill '{skill.name}' requires "
+                        f"bins not on PATH: {', '.join(missing)}"
+                    )
+                user_input = (
+                    f"[Skill invoked via /{skill.name}]\n"
+                    "--- BEGIN SKILL INSTRUCTIONS ---\n"
+                    f"{skill.body}\n"
+                    "--- END SKILL INSTRUCTIONS ---\n\n"
+                    f"User input: {skill_args or '(no additional args)'}\n"
+                    "Follow the skill's instructions above to handle this."
+                )
+                print(
+                    f"  {c(C.GREEN, '✦')} Loaded skill: "
+                    f"{c(C.CYAN, skill.name)} "
+                    f"{c(C.GRAY, f'({len(skill.body)} chars)')}"
+                )
+                # Fall through (no continue) — LLM call handles user_input below.
 
         # Inject CWD context
         cwd = os.getcwd()
