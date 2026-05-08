@@ -89,13 +89,18 @@ _REDIRECT_RE = re.compile(r"(2>>|2>|>>|>|<)\s*(\S+)")
 
 
 def _parse_segment(segment: str) -> tuple[list[str], dict[str, str]]:
-    """
-    Separa comando e redirects de um segmento de pipeline.
-    Retorna (cmd_parts, redirects_dict).
+    """Split command and redirects from a pipeline segment.
+
+    Returns (cmd_parts, redirects_dict).  FD duplication (``2>&1``,
+    ``1>&2`` etc.) is recognized and skipped — those are shell-level
+    operations, not file paths.
     """
     redirects = {}
     for match in _REDIRECT_RE.finditer(segment):
         op, target = match.group(1), match.group(2)
+        # FD duplication: 2>&1, 1>&2 — not a file path.
+        if target.startswith("&"):
+            continue
         if op == ">":
             redirects["stdout"] = target
         elif op == ">>":

@@ -20,7 +20,7 @@ from ..net_utils import (
     resolve_and_validate as _resolve_and_validate,
 )
 from . import ToolDefinition, ToolSafety, register_tool
-from .workspace import AGENT_WORKSPACE
+from .workspace import AGENT_WORKSPACE, assert_within_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -142,16 +142,21 @@ async def _close_pg_pools() -> None:
 
 # SQL statements that modify data
 _WRITE_PATTERNS = re.compile(
-    r"^\s*(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|REPLACE|MERGE)\b",
+    r"^\s*("
+    r"INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|REPLACE|MERGE"
+    r"|VACUUM|REINDEX|ANALYZE|GRANT|REVOKE|SET\s+ROLE|RESET"
+    r")\b",
     re.IGNORECASE,
 )
 
-# Dangerous patterns always blocked
+# Dangerous patterns always blocked (even in non-readonly mode)
 _BLOCKED_SQL = [
     r"\bATTACH\b",  # attach external databases
     r"\bDETACH\b",  # detach databases
     r"\bLOAD_EXTENSION\b",  # load extensions
     r"\bPRAGMA\s+.*=",  # write pragmas (read pragmas OK)
+    r"\bCOPY\s+.*\s+TO\s+PROGRAM\b",  # shell execution via PG (#020)
+    r"\bCOPY\s+.*\s+FROM\s+PROGRAM\b",  # shell execution via PG (#020)
 ]
 
 
@@ -232,10 +237,9 @@ def _validate_query(query: str, read_only: bool) -> str | None:
 def _validate_sqlite_path(db_path: str) -> str | None:
     """Ensure SQLite path is within workspace."""
     p = Path(db_path).expanduser().resolve()
-    try:
-        p.relative_to(AGENT_WORKSPACE)
-    except ValueError:
-        return f"Banco de dados fora do workspace permitido ({AGENT_WORKSPACE})"
+    err = assert_within_workspace(p)
+    if err:
+        return err
     if not p.exists():
         return f"Arquivo de banco de dados não encontrado: {db_path}"
     return None

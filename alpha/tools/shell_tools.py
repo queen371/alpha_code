@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import ToolDefinition, ToolSafety, register_tool
 from .safe_env import get_safe_env
-from .workspace import AGENT_WORKSPACE
+from .workspace import AGENT_WORKSPACE, assert_within_workspace
 
 # ─── Security: Hard Blocks (denylist model) ───
 #
@@ -128,10 +128,9 @@ async def _execute_shell(command: str, cwd: str = None, timeout: int | None = No
     # Validate and restrict cwd
     if cwd:
         cwd_path = Path(cwd).expanduser().resolve()
-        try:
-            cwd_path.relative_to(AGENT_WORKSPACE)
-        except ValueError:
-            return {"error": f"cwd fora do workspace permitido ({AGENT_WORKSPACE})"}
+        err = assert_within_workspace(cwd_path)
+        if err:
+            return {"error": err}
         cwd = str(cwd_path)
     else:
         cwd = str(AGENT_WORKSPACE)

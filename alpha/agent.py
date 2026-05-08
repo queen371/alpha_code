@@ -33,11 +33,25 @@ _SIMILARITY_THRESHOLD = _LD["similarity_threshold"]
 _CYCLE_WINDOW = _LD["cycle_window"]
 _STALE_WINDOW = _LD["stale_window"]
 _LOOP_DETECT_MIN_ITER = _LD["min_iter"]
+_LOOP_DETECT_MIN_CALLS = _LD["min_calls"]  # #018: gate by call count
 
 
 def _call_signature(tc: dict) -> str:
-    """Create a comparable signature from a tool call."""
-    return f"{tc['name']}:{tc['arguments']}"
+    """Create a deterministic signature normalizing JSON key order.
+
+    Modelos que emitem chaves JSON em ordem variavel (DeepSeek, Ollama
+    entre turns) produziriam assinaturas diferentes para chamadas
+    logicamente identicas — quebrando loop detection. `sort_keys=True`
+    garante que `{\"a\":1,\"b\":2}` e `{\"b\":2,\"a\":1}` colapsem
+    na mesma signature.
+    """
+    raw = tc.get("arguments", "")
+    try:
+        args = json.loads(raw) if raw else {}
+        normalized = json.dumps(args, sort_keys=True, ensure_ascii=False) if args else ""
+    except (json.JSONDecodeError, TypeError):
+        normalized = raw
+    return f"{tc['name']}:{normalized}"
 
 
 def _result_preview(result: object, limit: int = 500) -> str:
@@ -157,17 +171,22 @@ def _detect_cycle(calls: list[str]) -> bool:
 def _detect_stale_progress(
     recent_results: list[str], window: int = _STALE_WINDOW
 ) -> bool:
-    """Check if recent tool results are all very similar (no new info)."""
+    """Check if recent tool results are all very similar (no new info).
+
+    AUDIT_V1.2 #023: comparing everything against ``last_n[0]`` missed stale
+    progress when the sequence was e.g. [OK1, OK2, ERR3, ERR4, ERR5, ERR6]
+    — ERR3-6 are similar to each other but NOT to OK1. Pairwise ``zip``
+    comparison catches this: adjacent results that are all pairwise-similar
+    indicate the agent is stuck in the same failure mode.
+    """
     if len(recent_results) < window:
         return False
     last_n = recent_results[-window:]
-    # If all results are very similar to the first one, we're stale
-    base = last_n[0][:500]
-    similar_count = sum(
-        1 for r in last_n[1:]
-        if SequenceMatcher(None, base, r[:500]).ratio() > 0.90
+    pairs_similar = sum(
+        1 for a, b in zip(last_n, last_n[1:])
+        if SequenceMatcher(None, a[:500], b[:500]).ratio() > 0.90
     )
-    return similar_count >= window - 2  # allow 1 different result
+    return pairs_similar >= window - 2  # allow 1 transition
 
 
 def _detect_loop(
@@ -369,11 +388,12 @@ async def run_agent(
         if len(_recent_calls) > _CYCLE_WINDOW * 3:
             _recent_calls[:] = _recent_calls[-_CYCLE_WINDOW * 3:]
 
-        # Skip loop detection during early exploration. A single iteration with
-        # a parallel tool batch (e.g. project analysis spreading list_directory
-        # across siblings) shouldn't be flagged as a loop — by definition, a
-        # loop requires repetition across iterations.
-        if iteration + 1 < _LOOP_DETECT_MIN_ITER:
+        # Gate loop detection on accumulated tool calls, not iteration count.
+        # A single iteration with a large parallel batch can fill _recent_calls
+        # with 10+ entries before iteration 2, so a per-iteration threshold
+        # (e.g. 3) misses loops that emerge across early batch-heavy turns.
+        # AUDIT_V1.2 #018: gate by call count instead of iteration number.
+        if len(_recent_calls) < _LOOP_DETECT_MIN_CALLS:
             loop_reason = None
         else:
             loop_reason = _detect_loop(call_sigs, _recent_calls, _recent_results)

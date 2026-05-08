@@ -117,12 +117,19 @@ async def _screenshot(region: str = "full") -> dict:
     from pathlib import Path
     import tempfile
 
-    screenshot_dir = Path(tempfile.gettempdir()) / f"alpha_screenshots_{os.getuid()}"
-    screenshot_dir.mkdir(mode=0o700, exist_ok=True)
-    try:
-        os.chmod(screenshot_dir, 0o700)
-    except OSError:
-        pass
+    # AUDIT_V1.2 #D033: use mkdtemp (atomic create guaranteed by OS) instead
+    # of mkdir(exist_ok=True) + chmod — avoids TOCTOU race where attacker
+    # pre-creates the dir or plants a symlink in /tmp sticky-bit.
+    import atexit as _atexit
+    import shutil as _shutil
+    screenshot_dir = Path(tempfile.mkdtemp(
+        prefix=f"alpha_screenshots_{os.getuid()}_",
+        dir=tempfile.gettempdir(),
+    ))
+    # mkdtemp creates with 0o700 already, but ensure it stays private.
+    os.chmod(screenshot_dir, 0o700)
+    # Cleanup is best-effort; dir may already have files from this session.
+    _atexit.register(lambda: _shutil.rmtree(str(screenshot_dir), ignore_errors=True))
 
     filename = f"screenshot_{int(time.time())}_{secrets.token_hex(3)}.png"
     filepath = screenshot_dir / filename

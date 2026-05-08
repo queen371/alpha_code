@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import random
+import re
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -19,6 +20,19 @@ from ._security_log import sanitize_for_log
 from .config import LLM_TIMEOUT, get_provider_config
 
 logger = logging.getLogger(__name__)
+
+# DSML/XML invoke blocks that DeepSeek (and similar reasoning models) emit as
+# raw text when they "think" about tool calls before the structured tool_calls
+# field arrives. Leaking these to the terminal is noisy; strip them from content.
+_DSML_RE = re.compile(r"<\s*\|\s*DSML\s*\|[^>]*>", re.IGNORECASE)
+_XML_INVOKE_RE = re.compile(r"</?\s*invoke[^>]*>", re.IGNORECASE)
+
+
+def _strip_dsml(text: str) -> str:
+    """Remove DSML and <invoke> tags from LLM content text."""
+    text = _DSML_RE.sub("", text)
+    text = _XML_INVOKE_RE.sub("", text)
+    return text
 
 # ─── Retry / Rate-limit config ───
 
@@ -45,16 +59,30 @@ _LOW_TEMPERATURE = 0.2
 # substituimos.
 _shared_llm_client: httpx.AsyncClient | None = None
 _llm_client_loop: object | None = None
+_llm_client_lock = asyncio.Lock()
 
 
 async def _get_shared_llm_client() -> httpx.AsyncClient:
     global _shared_llm_client, _llm_client_loop
     loop = asyncio.get_running_loop()
+    # Fast path: no lock needed when client is healthy and loop matches.
     if (
-        _shared_llm_client is None
-        or _shared_llm_client.is_closed
-        or _llm_client_loop is not loop
+        _shared_llm_client is not None
+        and not _shared_llm_client.is_closed
+        and _llm_client_loop is loop
     ):
+        return _shared_llm_client
+    # AUDIT_V1.2 #006: lock protects the aclose() + reassign window against
+    # concurrent coroutines creating duplicate clients.
+    async with _llm_client_lock:
+        # Double-check after acquiring lock — another coroutine may have
+        # already rebuilt while we waited.
+        if (
+            _shared_llm_client is not None
+            and not _shared_llm_client.is_closed
+            and _llm_client_loop is loop
+        ):
+            return _shared_llm_client
         if _shared_llm_client is not None and not _shared_llm_client.is_closed:
             try:
                 await _shared_llm_client.aclose()
@@ -296,19 +324,25 @@ async def stream_chat_with_tools(
                         data = json.loads(data_str)
                         delta = data["choices"][0].get("delta", {})
 
-                        # Content tokens
+                        # Content tokens — strip DSML noise before yielding
                         content = delta.get("content", "")
                         if content:
-                            accumulated_content += content
-                            yield {"type": "content_token", "token": content}
+                            content = _strip_dsml(content)
+                            if content:
+                                accumulated_content += content
+                                yield {"type": "content_token", "token": content}
 
                         # Thinking tokens (DeepSeek-reasoner). Acumulados
                         # silenciosamente — nao streamamos para o usuario
                         # porque o formato e ruidoso e nao reflete a
                         # resposta final, mas precisam voltar pro provider.
+                        # AUDIT_V1.2 #022: cap at 50KB per turn — reasoning
+                        # can reach 100KB+ and bloats context invisibly.
                         reasoning = delta.get("reasoning_content", "")
                         if reasoning:
                             accumulated_reasoning += reasoning
+                            if len(accumulated_reasoning) > 50_000:
+                                accumulated_reasoning = accumulated_reasoning[-50_000:]
 
                         # Tool calls (streamed incrementally)
                         if delta.get("tool_calls"):

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from . import ToolDefinition, ToolSafety, register_tool
 from .safe_env import get_safe_env
-from .workspace import AGENT_WORKSPACE
+from .workspace import AGENT_WORKSPACE, assert_within_workspace
 
 # #D006: pre-compilada no module level. Antes era recompilada em cada
 # `_sanitize_git_args` (3-5 chamadas por tool call de log/show/diff/push/etc).
@@ -122,9 +122,14 @@ async def _run_git(args: list[str], cwd: str, timeout: int | None = None) -> dic
 
 
 def _find_git_repo(path: str) -> str | None:
-    """Walk up from path to find .git directory. Returns repo root or None."""
+    """Walk up to find .git directory. Never escapes AGENT_WORKSPACE."""
     p = Path(path).resolve()
+    ws = AGENT_WORKSPACE.resolve()
     while p != p.parent:
+        try:
+            p.relative_to(ws)
+        except ValueError:
+            return None
         if (p / ".git").exists():
             return str(p)
         p = p.parent
@@ -232,10 +237,9 @@ async def _git_operation(
     # Resolve repo path
     if path:
         repo_path = Path(path).expanduser().resolve()
-        try:
-            repo_path.relative_to(AGENT_WORKSPACE)
-        except ValueError:
-            return {"error": f"Path fora do workspace permitido ({AGENT_WORKSPACE})"}
+        err = assert_within_workspace(repo_path)
+        if err:
+            return {"error": err}
         cwd = str(repo_path)
     else:
         cwd = str(AGENT_WORKSPACE)

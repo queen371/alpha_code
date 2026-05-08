@@ -48,6 +48,8 @@ class MCPClient:
         self.proc: subprocess.Popen | None = None
         self.tools: list[dict] = []
         self._inbox: queue.Queue = queue.Queue()
+        self._notifications: list[dict] = []  # buffered server-initiated msgs (#007)
+        self._notifications_lock = threading.Lock()
         self._reader: threading.Thread | None = None
         self._stderr_reader: threading.Thread | None = None
         self._lock = threading.Lock()
@@ -167,6 +169,8 @@ class MCPClient:
         params: dict | None = None,
         timeout: float = DEFAULT_REQUEST_TIMEOUT,
     ) -> dict | None:
+        # AUDIT_V1.2 #007: release lock after send — holding it during the
+        # entire wait loop serialized all RPCs to the same server.
         with self._lock:
             req_id = self._next_id
             self._next_id += 1
@@ -175,36 +179,46 @@ class MCPClient:
                 req["params"] = params
             self._send(req)
 
-            deadline = time.monotonic() + timeout
-            while True:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise MCPError(
-                        f"MCP '{self.name}' timed out on '{method}' after {timeout}s"
-                    )
-                try:
-                    msg = self._inbox.get(timeout=remaining)
-                except queue.Empty:
-                    raise MCPError(
-                        f"MCP '{self.name}' timed out on '{method}' after {timeout}s"
-                    ) from None
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise MCPError(
+                    f"MCP '{self.name}' timed out on '{method}' after {timeout}s"
+                )
+            try:
+                msg = self._inbox.get(timeout=remaining)
+            except queue.Empty:
+                raise MCPError(
+                    f"MCP '{self.name}' timed out on '{method}' after {timeout}s"
+                ) from None
 
-                if msg is None:
-                    raise MCPError(
-                        f"MCP '{self.name}' closed connection during '{method}'"
-                    )
+            if msg is None:
+                raise MCPError(
+                    f"MCP '{self.name}' closed connection during '{method}'"
+                )
 
-                # Server-initiated notifications and stale ids are ignored.
-                if msg.get("id") != req_id:
-                    continue
+            # Server-initiated notifications (no id) — buffer, don't drop.
+            msg_id = msg.get("id")
+            if msg_id is None:
+                with self._notifications_lock:
+                    self._notifications.append(msg)
+                continue
 
-                if "error" in msg:
-                    err = msg["error"]
-                    raise MCPError(
-                        f"MCP '{self.name}' returned error on '{method}': "
-                        f"{err.get('code')} {err.get('message')}"
-                    )
-                return msg.get("result")
+            if msg_id != req_id:
+                # Response for a different request (concurrent RPCs now
+                # possible since lock is released after send). Put it
+                # back so the other caller can pick it up.
+                self._inbox.put(msg)
+                continue
+
+            if "error" in msg:
+                err = msg["error"]
+                raise MCPError(
+                    f"MCP '{self.name}' returned error on '{method}': "
+                    f"{err.get('code')} {err.get('message')}"
+                )
+            return msg.get("result")
 
     def _notify(self, method: str, params: dict | None = None) -> None:
         with self._lock:

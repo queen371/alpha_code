@@ -98,6 +98,11 @@ def estimate_messages_tokens(messages: list[dict]) -> int:
                 fn = tc.get("function", {})
                 total += estimate_tokens(fn.get("name", ""))
                 total += estimate_tokens(fn.get("arguments", ""))
+        # AUDIT_V1.2 #022: reasoning_content (DeepSeek thinking) can be
+        # 10-50KB per turn and wasn't counted — context overflow invisible.
+        reasoning = msg.get("reasoning_content")
+        if reasoning:
+            total += estimate_tokens(reasoning)
     return total
 
 
@@ -261,12 +266,39 @@ def _hard_truncate(
     `keep_recent` messages, removendo qualquer mensagem `role=tool` que
     sobrar sem o assistant.tool_calls correspondente — caso contrario o
     proximo request quebra com HTTP 400.
+
+    Tambem remove `assistant.tool_calls` do final da tail quando nao ha
+    tool responses correspondentes (DL022: tail `[user, assistant.tc]`
+    causava HTTP 400 porque tool_calls sem responses quebram a API).
     """
     sys_msg = messages[0]
     tail = list(messages[-keep_recent:]) if keep_recent > 0 else []
+    # 1. Drop tool messages orfas do INICIO da tail.
     while tail and tail[0].get("role") == "tool":
         tail.pop(0)
-    return [sys_msg] + tail
+    # 2. Drop assistant.tool_calls do FINAL sem tool responses.
+    while tail and tail[-1].get("role") == "assistant" and tail[-1].get("tool_calls"):
+        tcs = tail[-1]["tool_calls"]
+        tc_ids = {tc.get("id") for tc in tcs if tc.get("id")}
+        has_response = any(
+            m.get("role") == "tool" and m.get("tool_call_id") in tc_ids
+            for m in tail[:-1]
+        )
+        if has_response:
+            break
+        tail.pop()
+    # 3. Drop reasoning_content from all but the last assistant in the tail
+    #    (DL030: hard_truncate nao limpava reasoning antigo, acumulando bloat
+    #    de thinking tokens do DeepSeek-reasoner no fallback path).
+    result = [sys_msg] + tail
+    last_assistant_seen = False
+    for i in range(len(result) - 1, -1, -1):
+        if result[i].get("role") == "assistant":
+            if not last_assistant_seen:
+                last_assistant_seen = True
+            elif "reasoning_content" in result[i]:
+                del result[i]["reasoning_content"]
+    return result
 
 
 async def compress_context(
@@ -364,6 +396,18 @@ async def compress_context(
         + [summary_message]    # compressed summary
         + messages[end:]       # recent messages (protected tail)
     )
+
+    # AUDIT_V1.2 #022: drop reasoning_content from all but the last
+    # assistant message — the DeepSeek API requires it ONLY for the
+    # immediately preceding assistant turn. Carrying it forward across
+    # compressed messages bloats context and risks stale thinking leaks.
+    last_assistant_seen = False
+    for i in range(len(new_messages) - 1, -1, -1):
+        if new_messages[i].get("role") == "assistant":
+            if not last_assistant_seen:
+                last_assistant_seen = True  # keep reasoning on most recent
+            elif "reasoning_content" in new_messages[i]:
+                del new_messages[i]["reasoning_content"]
 
     tokens_after = estimate_messages_tokens(new_messages)
     logger.info(

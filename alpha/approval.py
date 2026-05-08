@@ -357,13 +357,17 @@ def _parse_rule(raw: str) -> PermissionRule | None:
     return PermissionRule(raw=raw, tool=tool, literal=literal, pattern=compiled)
 
 
-_rules_cached = False
+_rules_cached: str | None = None  # resolved settings path currently cached
 _allow_rules: list[PermissionRule] = []
 _deny_rules: list[PermissionRule] = []
 
 
 def _load_permission_rules() -> tuple[list[PermissionRule], list[PermissionRule]]:
-    """Read .alpha/settings.json's `permissions` block. Cached after first call.
+    """Read .alpha/settings.json's `permissions` block.
+
+    Cache keyed by the resolved settings path — re-loads when CWD changes
+    and a different settings.json is discovered (DL029: stale cache across
+    agent scopes).
 
     Schema:
     ```json
@@ -376,20 +380,22 @@ def _load_permission_rules() -> tuple[list[PermissionRule], list[PermissionRule]
     ```
     """
     global _rules_cached, _allow_rules, _deny_rules
-    if _rules_cached:
-        return _allow_rules, _deny_rules
 
     settings_path = find_config_file("settings.json")
+    if _rules_cached == str(settings_path):
+        return _allow_rules, _deny_rules
+
     raw = read_json(settings_path, default={})
     perms = raw.get("permissions") if isinstance(raw, dict) else None
     if not isinstance(perms, dict):
-        _rules_cached = True
+        _rules_cached = str(settings_path)
+        _allow_rules, _deny_rules = [], []
         return [], []
 
     allow = [r for r in (_parse_rule(s) for s in perms.get("allow") or []) if r]
     deny = [r for r in (_parse_rule(s) for s in perms.get("deny") or []) if r]
     _allow_rules, _deny_rules = allow, deny
-    _rules_cached = True
+    _rules_cached = str(settings_path)
     if allow or deny:
         logger.info(
             "Loaded %d allow / %d deny permission rule(s) from %s",
@@ -401,7 +407,7 @@ def _load_permission_rules() -> tuple[list[PermissionRule], list[PermissionRule]
 def reset_permission_cache() -> None:
     """Force a re-read of permission rules. For tests."""
     global _rules_cached, _allow_rules, _deny_rules
-    _rules_cached = False
+    _rules_cached = None
     _allow_rules = []
     _deny_rules = []
 

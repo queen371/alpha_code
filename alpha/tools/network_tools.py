@@ -42,6 +42,7 @@ _HTTP_INITIAL_BACKOFF = 0.5
 # CLI cria loop novo a cada invocacao mas o modulo persiste em cache.
 _shared_aiohttp_session = None  # type: ignore[var-annotated]
 _aiohttp_session_loop: object | None = None
+_aiohttp_session_lock = asyncio.Lock()
 
 
 async def _get_shared_aiohttp_session():
@@ -50,11 +51,21 @@ async def _get_shared_aiohttp_session():
     import aiohttp
 
     loop = asyncio.get_running_loop()
+    # Fast path: no lock needed when session is healthy and loop matches.
     if (
-        _shared_aiohttp_session is None
-        or _shared_aiohttp_session.closed
-        or _aiohttp_session_loop is not loop
+        _shared_aiohttp_session is not None
+        and not _shared_aiohttp_session.closed
+        and _aiohttp_session_loop is loop
     ):
+        return _shared_aiohttp_session
+    # AUDIT_V1.2 #006: lock protects the close() + reassign window.
+    async with _aiohttp_session_lock:
+        if (
+            _shared_aiohttp_session is not None
+            and not _shared_aiohttp_session.closed
+            and _aiohttp_session_loop is loop
+        ):
+            return _shared_aiohttp_session
         if (
             _shared_aiohttp_session is not None
             and not _shared_aiohttp_session.closed

@@ -191,15 +191,24 @@ def _sanitize_for_save(messages: list[dict]) -> list[dict]:
             cleaned.append(m)
 
     # Drop final assistant.tool_calls sem responses correspondentes.
+    # Also drop tool responses that belonged to the removed assistant
+    # (DL023: multi-call assistant with partial responses — e.g. 3 tcs,
+    # 2 responded, 1 Ctrl+C. Dropping assistant alone leaves orphan tool
+    # messages for the 2 responded ids).
     if pending_ids:
         for i in range(len(cleaned) - 1, -1, -1):
             entry = cleaned[i]
             if entry.get("role") == "assistant" and entry.get("tool_calls"):
-                if any(
-                    tc.get("id") in pending_ids
-                    for tc in entry["tool_calls"]
-                ):
+                tc_ids = {tc.get("id") for tc in entry["tool_calls"] if tc.get("id")}
+                if tc_ids & pending_ids:
                     cleaned.pop(i)
+                    cleaned[:] = [
+                        m for m in cleaned
+                        if not (
+                            m.get("role") == "tool"
+                            and m.get("tool_call_id") in tc_ids
+                        )
+                    ]
                     break
     return cleaned
 

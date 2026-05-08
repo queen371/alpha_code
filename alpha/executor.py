@@ -107,7 +107,19 @@ def _format_result(result: dict, tool_name: str) -> str:
     }
     out = json.dumps(truncated, ensure_ascii=False)
     if len(out) > TOOL_RESULT_MAX_CHARS:
-        out = out[:TOOL_RESULT_MAX_CHARS]
+        # AUDIT_V1.2 #019: slicing raw JSON mid-string produces invalid JSON
+        # (unbalanced braces/quotes), which causes provider HTTP 400.
+        # Replace with a minimal valid JSON object.
+        minimal = {
+            "truncated": True,
+            "tool": tool_name,
+            "message": (
+                f"Result too large even after preview truncation "
+                f"(>{TOOL_RESULT_MAX_CHARS} chars). Use offset/limit args "
+                f"on this tool or split the work."
+            ),
+        }
+        out = json.dumps(minimal, ensure_ascii=False)
     return out
 
 
