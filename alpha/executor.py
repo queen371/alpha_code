@@ -100,9 +100,10 @@ def _cheap_len(v) -> int:
 def _format_result(result: dict, tool_name: str) -> str:
     """Truncate and format a tool result for inclusion in messages.
 
-    Hot path: a estimativa cheap (sum de len(str(v))) evita o `json.dumps`
-    completo da resposta inteira so para descobrir o tamanho. Se passar do
-    limite, cada campo de string e cortado por chars (limite por campo) — a
+    Hot path: _cheap_len estima o tamanho serializado sem json.dumps
+    completo. Se passar do limite, strings sao cortadas por campo
+    em vez de fatiar JSON serializado bruto.
+    """
     versao antiga fatiava no meio do JSON ja serializado, podendo cortar em
     `\\uXXXX` ou em multi-byte UTF-8 e produzir saida com texto corrompido.
     """

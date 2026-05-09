@@ -174,6 +174,20 @@ def _detect_cycle(calls: list[str]) -> bool:
     return False
 
 
+def _quick_similar(a: str, b: str) -> bool:
+    """Pre-filtro barato antes de SequenceMatcher.ratio().
+
+    Evita o O(N²) do ratio() quando os resultados são obviamente
+    idênticos (mesmo prefixo) ou obviamente diferentes (tamanhos
+    dispares).
+    """
+    if abs(len(a) - len(b)) > 100:
+        return False
+    if a[:100] == b[:100]:
+        return True
+    return SequenceMatcher(None, a[:500], b[:500]).ratio() > 0.90
+
+
 def _detect_stale_progress(
     recent_results: list[str], window: int = _STALE_WINDOW
 ) -> bool:
@@ -188,16 +202,6 @@ def _detect_stale_progress(
     if len(recent_results) < window:
         return False
     last_n = recent_results[-window:]
-
-    # DEEP_PERFORMANCE #D032: pre-filtro barato antes de SequenceMatcher.
-    # Se os 100 primeiros chars são idênticos, considera similar sem pagar
-    # o O(N²) do ratio(). Se os tamanhos diferem por >100 chars, descarta.
-    def _quick_similar(a: str, b: str) -> bool:
-        if abs(len(a) - len(b)) > 100:
-            return False
-        if a[:100] == b[:100]:
-            return True
-        return SequenceMatcher(None, a[:500], b[:500]).ratio() > 0.90
 
     pairs_similar = sum(
         1 for a, b in zip(last_n, last_n[1:])
