@@ -20,6 +20,8 @@ import subprocess
 import threading
 import time
 
+from ..tools.safe_env import get_safe_env
+
 logger = logging.getLogger(__name__)
 
 PROTOCOL_VERSION = "2025-06-18"
@@ -58,7 +60,8 @@ class MCPClient:
     # ── Lifecycle ──
 
     def start(self) -> None:
-        merged_env = {**os.environ, **self.extra_env}
+        base_env = get_safe_env()
+        merged_env = {**base_env, **self.extra_env}
         try:
             self.proc = subprocess.Popen(
                 [self.command, *self.args],
