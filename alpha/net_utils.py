@@ -87,7 +87,7 @@ async def resolve_and_validate(hostname: str) -> str:
             raise ValueError(f"DNS resolution failed for {hostname}")
         # Check ALL resolved addresses, not just the first — an attacker
         # can mix public+private records and AF_UNSPEC returns both families.
-        for _family, _, _, _, sockaddr in infos:
+        for _, _, _, _, sockaddr in infos:
             if is_private_ip_address(sockaddr[0]):
                 raise ValueError(
                     f"IP {sockaddr[0]} is private (resolved from {hostname})"
