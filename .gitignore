@@ -1,0 +1,75 @@
+# Environment variables
+.env
+.env.*
+!.env.example
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+sdist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Secrets & credentials
+*.key
+*.pem
+credentials*.json
+secrets*.json
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cache
+.cache/
+.mypy_cache/
+**/.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Local WIP / unrelated projects
+lab-recorder/
+
+# Internal security/code audits — kept local only.
+# STATUS.md is here too because it summarizes audit findings (open
+# CRITICOs/ALTOs with file:line references) which become an exploit
+# roadmap in a public repo. SKILLS_AUDIT.md is generated from the local
+# environment and reveals which CLIs are installed on the author's box.
+# USER_GUIDE.md is intentionally NOT ignored — it's the public manual.
+docs/audits/
+docs/STATUS.md
+docs/SKILLS_AUDIT.md
+
+# Backup of .git/ (local snapshot before risky operations)
+.git.backup/
+
+# Local-only skills (not distributed with Alpha)
+skills/git-save/
+skills/audit-1-front-scan/
+skills/audit-2-front-review/
+skills/audit-3-front-ux/
+skills/audit-4-front-perf/
+skills/audit-front-deep/

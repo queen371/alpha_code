@@ -1,0 +1,92 @@
+#!/bin/sh
+# pre-commit guard — refuses to commit obvious secrets.
+#
+# This hook is LOCAL only (git hooks are not tracked). To install on a
+# fresh clone:
+#   cp scripts/hooks/pre-commit .git/hooks/pre-commit && chmod +x $_
+#
+# Patterns covered:
+#   - Anthropic, OpenAI, xAI keys (sk-ant-..., sk-..., xai-...)
+#   - GitHub PATs (ghp_..., gho_..., ghs_..., ghu_...)
+#   - AWS access keys (AKIA...)
+#   - Google API keys (AIza...)
+#   - Slack tokens (xox[abp]-...)
+#   - Stripe live keys (sk_live_..., pk_live_...)
+#   - Generic long high-entropy `KEY=` / `TOKEN=` / `SECRET=` assignments
+#   - Staging of .env / *.key / *.pem files (belt-and-suspenders to .gitignore)
+
+set -e
+
+red()   { printf '\033[31m%s\033[0m\n' "$1"; }
+yellow(){ printf '\033[33m%s\033[0m\n' "$1"; }
+
+# 1) Block staging of obviously sensitive files even if .gitignore slips.
+sensitive_files=$(git diff --cached --name-only --diff-filter=A | grep -E '(^|/)\.env($|\..*$)|\.(key|pem)$|credentials.*\.json$|secrets.*\.json$' || true)
+if [ -n "$sensitive_files" ]; then
+  red "❌ Refusing to commit sensitive files:"
+  printf '   %s\n' $sensitive_files
+  red "   Add them to .gitignore or use git rm --cached."
+  exit 1
+fi
+
+# 2) Scan staged diff for known secret patterns.
+# `git diff --cached -U0` keeps the diff narrow (added lines only, no context)
+# so we don't false-match strings the commit only *removes*.
+diff_added=$(git diff --cached -U0 --no-color | grep -E '^\+[^+]' || true)
+
+if [ -z "$diff_added" ]; then
+  exit 0
+fi
+
+# Each pattern is one extended regex. We `printf` them so escaping is sane.
+patterns=$(cat <<'EOF'
+sk-ant-[A-Za-z0-9_-]{20,}
+sk-proj-[A-Za-z0-9_-]{20,}
+sk-[A-Za-z0-9]{32,}
+xai-[A-Za-z0-9]{20,}
+ghp_[A-Za-z0-9]{30,}
+gho_[A-Za-z0-9]{30,}
+ghs_[A-Za-z0-9]{30,}
+ghu_[A-Za-z0-9]{30,}
+AKIA[0-9A-Z]{16}
+AIza[0-9A-Za-z_-]{30,}
+xox[abps]-[A-Za-z0-9-]{20,}
+sk_live_[A-Za-z0-9]{20,}
+pk_live_[A-Za-z0-9]{20,}
+EOF
+)
+
+hits=""
+while IFS= read -r pat; do
+  [ -z "$pat" ] && continue
+  match=$(printf '%s\n' "$diff_added" | grep -E "$pat" || true)
+  if [ -n "$match" ]; then
+    hits="$hits$pat\n"
+  fi
+done <<EOF
+$patterns
+EOF
+
+# 3) Generic high-entropy KEY= / TOKEN= / SECRET= / PASSWORD= assignments.
+# Only flags lines that look like real secrets (>=20 char value, no obvious
+# placeholder words). Tuned to skip "KEY=changeme" / "API_KEY=your-key-here".
+generic=$(printf '%s\n' "$diff_added" \
+  | grep -iE '(api[_-]?key|secret|token|password|passwd|auth)[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9/_+=-]{20,}' \
+  | grep -ivE '(your[_-]?(api[_-]?)?key|placeholder|example|changeme|<.*>|\$\{|os\.getenv|process\.env|env\[)' \
+  || true)
+
+if [ -n "$generic" ]; then
+  hits="${hits}generic high-entropy assignment\n"
+fi
+
+if [ -n "$hits" ]; then
+  red "❌ Possible secret in staged diff:"
+  printf '   matched pattern(s):\n'
+  printf "$hits" | sed 's/^/     - /'
+  echo
+  yellow "   Review with: git diff --cached"
+  yellow "   If a false positive, bypass with: git commit --no-verify"
+  exit 1
+fi
+
+exit 0

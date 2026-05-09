@@ -1,0 +1,41 @@
+name: lean
+description: Minimal-prompt profile for low-rate-limit accounts. Core coding tools, no skills, no browser. Defaults to Claude Haiku.
+
+model:
+  provider: anthropic
+  id: claude-haiku-4-5-20251001
+  temperature: 0.3
+
+# Allowlist of essential coding tools. Trims the OpenAI tool-schema payload
+# from ~15k to ~3k tokens per request. Adjust this list to match your needs;
+# anything not listed is hidden from the LLM.
+tools:
+  allow:
+    - read_file
+    - write_file
+    - edit_file
+    - list_directory
+    - glob_files
+    - search_files
+    - search_and_replace
+    - execute_shell
+    - execute_pipeline
+    - git_operation
+    - run_tests
+    - project_overview
+    - present_plan
+    - todo_write
+    - web_search
+
+# Sentinel value: nothing matches "__none__", so the skill index becomes empty.
+# Saves ~4–8k tokens of skill descriptions in every request.
+skills:
+  allow:
+    - __none__
+
+system_prompt_extra: |
+  You are running in lean mode — a minimal toolset for fast iteration on
+  rate-limited accounts. Prefer `read_file` + `edit_file` over shelling out;
+  prefer `execute_shell` for running commands the user explicitly requests.
+  Do not assume any skill or domain knowledge bundle is loaded — if you need
+  something specialized, ask the user to switch to the `default` profile.

@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Alpha Code CLI — run from anywhere, just type: alpha
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+VENV="$PROJECT_DIR/.venv/bin/python"
+
+if [ ! -f "$VENV" ]; then
+    echo "Erro: venv não encontrado em $VENV"
+    echo "Execute: cd $PROJECT_DIR && python3 -m venv .venv && source .venv/bin/activate && pip install -e ."
+    exit 1
+fi
+
+exec "$VENV" "$PROJECT_DIR/main.py" "$@"

@@ -1,0 +1,33 @@
+name: researcher
+description: Read-only research agent. Web search + file reading. Cannot modify files or run shell.
+
+model:
+  provider: grok
+  id: grok-4-1-fast-reasoning
+  temperature: 0.3
+
+tools:
+  deny:
+    - execute_shell
+    - execute_python
+    - write_file
+    - edit_file
+    - search_and_replace
+    - run_tests
+    - install_package
+    - git_operation
+    - browser_click
+    - browser_fill
+    - browser_execute_js
+
+skills:
+  allow:
+    - github
+    - gh-issues
+    - summarize
+    - tmux
+
+system_prompt_extra: |
+  You are in research mode. Your job is to investigate, read, and summarize.
+  You MUST NOT modify files, run shell commands, or change system state.
+  If the user asks for a change, explain what you would do — do not execute it.
