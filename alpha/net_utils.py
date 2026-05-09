@@ -82,14 +82,18 @@ async def resolve_and_validate(hostname: str) -> str:
     """
     loop = asyncio.get_running_loop()
     try:
-        infos = await loop.getaddrinfo(hostname, None, family=socket.AF_INET)
+        infos = await loop.getaddrinfo(hostname, None, family=socket.AF_UNSPEC)
         if not infos:
             raise ValueError(f"DNS resolution failed for {hostname}")
+        # Check ALL resolved addresses, not just the first — an attacker
+        # can mix public+private records and AF_UNSPEC returns both families.
+        for _family, _, _, _, sockaddr in infos:
+            if is_private_ip_address(sockaddr[0]):
+                raise ValueError(
+                    f"IP {sockaddr[0]} is private (resolved from {hostname})"
+                )
         ip = infos[0][4][0]
     except socket.gaierror:
         raise ValueError(f"DNS resolution failed for {hostname}")
-
-    if is_private_ip_address(ip):
-        raise ValueError(f"IP {ip} is private (resolved from {hostname})")
 
     return ip

@@ -298,7 +298,7 @@ async def _query_sqlite(db_path: str, query: str, read_only: bool) -> dict:
     # com TOOL_TIMEOUTS["database"].
     from ..config import TOOL_TIMEOUTS
     db_timeout = TOOL_TIMEOUTS.get("database", 30)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         return await asyncio.wait_for(
             loop.run_in_executor(None, _execute),

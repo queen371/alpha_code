@@ -53,7 +53,7 @@ def build_assistant_tool_message(
     """
     msg: dict = {
         "role": "assistant",
-        "content": content or None,
+        "content": content if content else "",
         "tool_calls": [
             {
                 "id": tc["id"],
@@ -147,10 +147,11 @@ def _append_tool_msg(messages: list[dict], tc_id: str, result: dict, tool_name: 
     campo). Sem este helper, error messages com paths absolutos longos
     podiam passar de TOOL_RESULT_MAX_CHARS (#D022).
     """
+    content = _format_result(result, tool_name)
     messages.append({
         "role": "tool",
         "tool_call_id": tc_id,
-        "content": _format_result(result, tool_name),
+        "content": f"<tool_result>{content}</tool_result>",
     })
 
 
