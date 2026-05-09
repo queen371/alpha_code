@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import logging
 import re
+import shutil
+import sys
 import tempfile
 from pathlib import Path
 
@@ -97,22 +99,34 @@ def _build_key_bindings(attached: dict[int, Path]) -> KeyBindings:
     return kb
 
 
+def _frame_border() -> str:
+    """Horizontal rule used as the top/bottom frame around the prompt."""
+    from .display import C, c
+    cols = max(40, shutil.get_terminal_size((80, 24)).columns - 4)
+    return c(C.GRAY_DARK, "─" * cols)
+
+
 def _bottom_toolbar() -> "ANSI":
-    """Status line below the prompt showing auto-accept mode + hint."""
+    """Bottom frame: closing border, blank spacer, then accept-edits status.
+    Matches Claude Code's framed input zone — the prompt sits between this
+    block and the top border printed by `read_input` before session.prompt."""
     from .display import C, c, is_auto_accept
 
     if is_auto_accept():
-        text = (
+        status = (
             f" {c(C.AMBER_SOFT + C.BOLD, '»»')} "
             f"{c(C.AMBER_SOFT + C.BOLD, 'accept edits on')} "
             f"{c(C.GRAY, '(shift+tab to cycle) · ctrl+c to interrupt')}"
         )
     else:
-        text = (
+        status = (
             f" {c(C.GRAY, '»»')} "
             f"{c(C.GRAY, 'accept edits off')} "
             f"{c(C.GRAY_DARK, '(shift+tab to enable) · ctrl+c to interrupt')}"
         )
+    # Bottom border + blank spacer + status (3 lines, prompt_toolkit renders
+    # bottom_toolbar as multi-line when ANSI string contains newlines).
+    text = f"  {_frame_border()}\n\n{status}"
     return ANSI(text)
 
 
@@ -161,6 +175,15 @@ class _SlashCompleter(Completer):
     hits space, completion stops so it doesn't compete with normal text.
     """
 
+    # DEEP_PERFORMANCE #D029: cache de entries para evitar list_skills()
+    # (que itera o filesystem) a cada keystroke. Invalidado quando skills
+    # são recarregadas via invalidate_skill_entries_cache().
+    _entries_cache: list[tuple[str, str]] | None = None
+
+    @classmethod
+    def invalidate_cache(cls) -> None:
+        cls._entries_cache = None
+
     def get_completions(self, document, complete_event):
         line = document.text_before_cursor
         if not line.startswith("/") or " " in line:
@@ -168,14 +191,18 @@ class _SlashCompleter(Completer):
 
         # Skills are imported lazily so this module stays import-cheap and
         # doesn't pull the registry at definition time.
-        entries: list[tuple[str, str]] = list(_BUILTIN_COMMANDS)
-        try:
-            from .skills import list_skills
-            for s in list_skills():
-                meta = (s.description or "").strip().split("\n", 1)[0]
-                entries.append((f"/{s.name}", meta[:80] or "skill"))
-        except Exception:
-            pass
+        if _SlashCompleter._entries_cache is None:
+            entries: list[tuple[str, str]] = list(_BUILTIN_COMMANDS)
+            try:
+                from .skills import list_skills
+                for s in list_skills():
+                    meta = (s.description or "").strip().split("\n", 1)[0]
+                    entries.append((f"/{s.name}", meta[:80] or "skill"))
+            except Exception:
+                pass
+            _SlashCompleter._entries_cache = entries
+        else:
+            entries = _SlashCompleter._entries_cache
 
         # Substring match with prefix-first ranking: typing `/save` matches
         # both `/save-anything` (prefix) and `/git-save` (substring). Prefix
@@ -237,6 +264,12 @@ def read_input(prompt_ansi: str) -> tuple[str, list[Path]]:
     Raises EOFError on Ctrl+D and KeyboardInterrupt on Ctrl+C — same as
     the builtin `input()`.
     """
+    # Top frame border + spacer above the prompt — pairs with the bottom
+    # border emitted via `_bottom_toolbar` to give the input area a
+    # demarcated "input box" feel (mirrors Claude Code's frame).
+    sys.stdout.write(f"\n  {_frame_border()}\n")
+    sys.stdout.flush()
+
     attached: dict[int, Path] = {}
     kb = _build_key_bindings(attached)
     session = _get_session()

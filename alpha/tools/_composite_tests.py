@@ -32,9 +32,14 @@ async def _run_tests(
         elif (target_path / "go.mod").exists():
             framework = "go"
         else:
+            # DEEP_PERFORMANCE #D028: skip dirs de noise (node_modules, .git, .venv etc.)
+            # para evitar rglob de 100K+ arquivos em monorepos.
+            _SKIP_DIRS = {".git", "node_modules", ".venv", "__pycache__",
+                          ".mypy_cache", ".pytest_cache", ".ruff_cache", "dist", "build"}
             test_files = [
                 p for p in target_path.rglob("*.py")
-                if p.name.startswith("test_") or p.name.endswith("_test.py")
+                if (p.name.startswith("test_") or p.name.endswith("_test.py"))
+                and not any(part in _SKIP_DIRS for part in p.relative_to(target_path).parts)
             ]
             if test_files:
                 framework = "pytest"

@@ -10,6 +10,7 @@ import logging
 from collections import Counter
 from collections.abc import AsyncGenerator
 from difflib import SequenceMatcher
+from functools import lru_cache
 
 from .approval import is_denied, needs_approval
 from .config import MAX_ITERATIONS
@@ -76,15 +77,20 @@ def _result_preview(result: object, limit: int = 500) -> str:
     return "".join(parts)[:limit]
 
 
-def _parse_args_values(args_str: str) -> list[str]:
-    """Extract individual argument values from JSON args for comparison."""
+@lru_cache(maxsize=128)
+def _parse_args_values(args_str: str) -> tuple[str, ...]:
+    """Extract individual argument values from JSON args for comparison.
+
+    DEEP_PERFORMANCE #D031: lru_cache evita re-parse de json.loads()
+    nos mesmos args_str a cada comparação. Retorna tuple para hashability.
+    """
     try:
         args = json.loads(args_str)
         if isinstance(args, dict):
-            return [str(v) for v in args.values()]
+            return tuple(str(v) for v in args.values())
     except (json.JSONDecodeError, TypeError):
         pass
-    return [args_str]
+    return (args_str,)
 
 
 def _strip_common_prefix(va: str, vb: str) -> tuple[str, str]:
@@ -182,9 +188,20 @@ def _detect_stale_progress(
     if len(recent_results) < window:
         return False
     last_n = recent_results[-window:]
+
+    # DEEP_PERFORMANCE #D032: pre-filtro barato antes de SequenceMatcher.
+    # Se os 100 primeiros chars são idênticos, considera similar sem pagar
+    # o O(N²) do ratio(). Se os tamanhos diferem por >100 chars, descarta.
+    def _quick_similar(a: str, b: str) -> bool:
+        if abs(len(a) - len(b)) > 100:
+            return False
+        if a[:100] == b[:100]:
+            return True
+        return SequenceMatcher(None, a[:500], b[:500]).ratio() > 0.90
+
     pairs_similar = sum(
         1 for a, b in zip(last_n, last_n[1:])
-        if SequenceMatcher(None, a[:500], b[:500]).ratio() > 0.90
+        if _quick_similar(a, b)
     )
     return pairs_similar >= window - 2  # allow 1 transition
 

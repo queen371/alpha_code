@@ -51,13 +51,29 @@ async def _read_file(path: str, offset: int = 0, limit: int = 500) -> dict:
     if not p.is_file():
         return {"error": f"Não é um arquivo: {path}"}
     try:
-        text = p.read_text(errors="replace")
-        lines = text.splitlines()
-        selected = lines[offset : offset + limit]
+        # DEEP_PERFORMANCE #D027: streaming read para arquivos grandes.
+        # read_text() + splitlines() materializa o arquivo inteiro em RAM
+        # mesmo com offset/limit pequenos. Para arquivos >= 100KB, fazemos
+        # streaming com open() — conta total de linhas e só guarda as do range.
+        # Custo: O(n) CPU (contar \n), O(limit) RAM (só as linhas visíveis).
+        fsize = p.stat().st_size
+        if fsize < 100_000:
+            text = p.read_text(errors="replace")
+            lines = text.splitlines()
+            selected = lines[offset : offset + limit]
+            total_lines = len(lines)
+        else:
+            selected: list[str] = []
+            total_lines = 0
+            with open(p, "r", errors="replace", buffering=65536) as f:
+                for i, line in enumerate(f):
+                    total_lines = i + 1
+                    if offset <= i < offset + limit:
+                        selected.append(line.rstrip("\n"))
         numbered = "\n".join(f"{i + offset + 1}: {line}" for i, line in enumerate(selected))
         return {
             "path": str(p),
-            "total_lines": len(lines),
+            "total_lines": total_lines,
             "offset": offset,
             "lines_returned": len(selected),
             "content": numbered,
@@ -353,18 +369,21 @@ def _search_with_python(regex: "re.Pattern[str]", root: Path, max_results: int) 
             try:
                 if fpath.stat().st_size > 1_000_000:
                     continue
-                text = fpath.read_text(errors="replace")
+                # DEEP_PERFORMANCE #037: streaming read em vez de
+                # read_text() + splitlines() que materializa o arquivo
+                # inteiro (até 999KB) em RAM duas vezes (string + lista).
+                with open(fpath, "r", errors="replace", buffering=65536) as f:
+                    for i, line in enumerate(f, 1):
+                        if regex.search(line):
+                            out.append({
+                                "file": str(fpath),
+                                "line": i,
+                                "content": line.strip()[:200],
+                            })
+                            if len(out) >= max_results:
+                                return out
             except (PermissionError, OSError):
                 continue
-            for i, line in enumerate(text.splitlines(), 1):
-                if regex.search(line):
-                    out.append({
-                        "file": str(fpath),
-                        "line": i,
-                        "content": line.strip()[:200],
-                    })
-                    if len(out) >= max_results:
-                        break
     return out
 
 

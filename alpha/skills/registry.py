@@ -23,7 +23,15 @@ _registry: FileBackedRegistry[Skill] = FileBackedRegistry(
 
 
 def load_all_skills(force: bool = False) -> dict[str, Skill]:
-    return _registry.load_all(force=force)
+    result = _registry.load_all(force=force)
+    # DEEP_PERFORMANCE #D029: invalidar cache do _SlashCompleter quando
+    # skills são recarregadas (startup ou /reload).
+    try:
+        from ..repl_input import _SlashCompleter
+        _SlashCompleter.invalidate_cache()
+    except Exception:
+        pass
+    return result
 
 
 def get_skill(name: str) -> Skill | None:

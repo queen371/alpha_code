@@ -791,9 +791,12 @@ class ThinkingIndicator:
     _DISABLE_SCROLL_ENV = "ALPHA_NO_SCROLL_REGION"
 
     # Fixed reserved rows below the optional todo panel:
-    #   row N-1 → spinner
-    #   row N   → accept-edits hint (or blank when auto-accept is off)
-    _BASE_RESERVED = 2
+    #   row N-2 → spinner
+    #   row N-1 → accept-edits hint (or blank when auto-accept is off)
+    #   row N   → bottom padding (always blank — keeps the indicator from
+    #             being glued to the terminal's bottom edge, matches the
+    #             breathing room around Claude Code's status row).
+    _BASE_RESERVED = 3
 
     # Hard cap on rendered panel rows even if the todo list is longer.
     _MAX_PANEL_ROWS = 12
@@ -1045,10 +1048,11 @@ class ThinkingIndicator:
         panel_lines = self._build_panel_lines()
         rows = self._term_rows
         reserved = self._total_reserved()
-        # Layout (top→bottom): panel rows · spinner · status.
+        # Layout (top→bottom): panel rows · spinner · status · blank pad.
+        # Bottom row stays blank so the indicator isn't glued to the edge.
         panel_top = rows - reserved + 1
-        spinner_row = rows - 1
-        status_row = rows
+        spinner_row = rows - 2
+        status_row = rows - 1
 
         out_parts = ["\033[s"]
         for i, line in enumerate(panel_lines):

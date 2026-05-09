@@ -25,6 +25,11 @@ CHARS_PER_TOKEN = 4
 # so the compression trigger fires before the model's real budget is hit.
 IMAGE_TOKEN_COST = 1500
 
+# DEEP_PERFORMANCE #033: cache de estimate_messages_tokens.
+_last_messages_id: int | None = None
+_last_messages_len: int = 0
+_last_token_estimate: int = 0
+
 import contextvars  # noqa: E402 — keep grouped with the failure counter
 
 # Quantos retries de LLM-based compression antes de cair em truncacao crua.
@@ -88,21 +93,33 @@ def _estimate_content_tokens(content) -> int:
 
 
 def estimate_messages_tokens(messages: list[dict]) -> int:
-    """Estimate total tokens across all messages."""
+    """Estimate total tokens across all messages.
+
+    DEEP_PERFORMANCE #033: cache por id(messages)+len. Chamada 4x por turno
+    (needs_compression, _context_pct, compress_until_under_budget, logging).
+    A lista é mutada in-place (append/pop), então len() captura mudanças.
+    """
+    global _last_messages_id, _last_messages_len, _last_token_estimate
+    mid = id(messages)
+    mlen = len(messages)
+    if mid == _last_messages_id and mlen == _last_messages_len:
+        return _last_token_estimate
+
     total = 0
     for msg in messages:
         total += _estimate_content_tokens(msg.get("content"))
-        # Tool calls in assistant messages add tokens too
         if msg.get("tool_calls"):
             for tc in msg["tool_calls"]:
                 fn = tc.get("function", {})
                 total += estimate_tokens(fn.get("name", ""))
                 total += estimate_tokens(fn.get("arguments", ""))
-        # AUDIT_V1.2 #022: reasoning_content (DeepSeek thinking) can be
-        # 10-50KB per turn and wasn't counted — context overflow invisible.
         reasoning = msg.get("reasoning_content")
         if reasoning:
             total += estimate_tokens(reasoning)
+
+    _last_messages_id = mid
+    _last_messages_len = mlen
+    _last_token_estimate = total
     return total
 
 

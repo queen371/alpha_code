@@ -47,14 +47,12 @@ _EXPLICIT_KEYS = frozenset(
     }
 )
 
-# TTL (#028 V1.1): cache sem expiracao perdia mudancas em os.environ feitas
-# durante a sessao (ex: usuario carrega um novo .env via /load, ou um hook
-# define ALPHA_DEBUG=1). 60s e curto o suficiente para refletir mudancas
-# em tempo razoavel sem reconstruir o dict a cada subprocess call.
-_CACHE_TTL_SECONDS = 60.0
-
+# DEEP_PERFORMANCE #036: cache invalida por mudança real em os.environ
+# (len()), não por TTL. Se o usuário modificar o VALOR de uma variável
+# existente sem alterar o número de vars, o cache não invalida — nesse
+# caso raro, chame invalidate_safe_env_cache() explicitamente.
 _cached_safe_env: dict[str, str] | None = None
-_cached_at: float = 0.0
+_last_env_size: int = -1
 
 
 def _build_safe_env() -> dict[str, str]:
@@ -68,19 +66,18 @@ def _build_safe_env() -> dict[str, str]:
 def get_safe_env() -> dict[str, str]:
     """Return os.environ stripped of credentials for subprocess use.
 
-    Result is cached for `_CACHE_TTL_SECONDS`; call
-    `invalidate_safe_env_cache()` for an immediate refresh.
+    Cache invalida quando o número de variáveis de ambiente muda.
     """
-    global _cached_safe_env, _cached_at
-    now = time.monotonic()
-    if _cached_safe_env is None or (now - _cached_at) >= _CACHE_TTL_SECONDS:
+    global _cached_safe_env, _last_env_size
+    cur_size = len(os.environ)
+    if _cached_safe_env is None or cur_size != _last_env_size:
         _cached_safe_env = _build_safe_env()
-        _cached_at = now
+        _last_env_size = cur_size
     return _cached_safe_env
 
 
 def invalidate_safe_env_cache():
     """Invalidate cached safe env (call if os.environ is modified at runtime)."""
-    global _cached_safe_env, _cached_at
+    global _cached_safe_env, _last_env_size
     _cached_safe_env = None
-    _cached_at = 0.0
+    _last_env_size = -1

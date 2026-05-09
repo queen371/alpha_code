@@ -74,6 +74,29 @@ def build_assistant_tool_message(
 _PREVIEW_FIELD_MAX = 1000
 
 
+def _cheap_len(v) -> int:
+    """Estimativa rápida do tamanho serializado sem alocar string gigante.
+
+    DEEP_PERFORMANCE #D030: `len(str(v))` em dicts/listas aninhados
+    materializa a representação inteira só para medir. Para coleções,
+    amostramos os primeiros 50 itens e extrapolamos.
+    """
+    if isinstance(v, str):
+        return len(v)
+    if isinstance(v, (list, tuple)):
+        if len(v) <= 50:
+            return sum(_cheap_len(x) for x in v)
+        sample = sum(_cheap_len(x) for x in v[:50])
+        return sample * (len(v) // 50) + 100  # margem de segurança
+    if isinstance(v, dict):
+        items = list(v.items())
+        if len(items) <= 50:
+            return sum(_cheap_len(k) + _cheap_len(val) + 4 for k, val in items)
+        sample = sum(_cheap_len(k) + _cheap_len(val) + 4 for k, val in items[:50])
+        return sample * (len(items) // 50) + 100
+    return len(str(v))
+
+
 def _format_result(result: dict, tool_name: str) -> str:
     """Truncate and format a tool result for inclusion in messages.
 
@@ -87,7 +110,7 @@ def _format_result(result: dict, tool_name: str) -> str:
     # `_previous_content` used to render the edit diff in the terminal,
     # but pointless and bloating to send back to the LLM).
     result = {k: v for k, v in result.items() if not (isinstance(k, str) and k.startswith("_"))}
-    estimated = sum(len(str(v)) for v in result.values()) + 100
+    estimated = sum(_cheap_len(v) for v in result.values()) + 100
     if estimated <= TOOL_RESULT_MAX_CHARS:
         return json.dumps(result, ensure_ascii=False)
 

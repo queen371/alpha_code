@@ -260,7 +260,7 @@ async def _install_package(package: str) -> dict:
 
     try:
         r = await run_subprocess_safe(
-            sys.executable, "-m", "pip", "install", "--no-cache-dir", package,
+            sys.executable, "-m", "pip", "install", package,  # DEEP_PERFORMANCE #034: sem --no-cache-dir
             timeout=120,
         )
     except SubprocessTimeoutError:
