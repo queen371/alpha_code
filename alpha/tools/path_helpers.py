@@ -89,6 +89,8 @@ def _fuzzy_resolve_from_base(base: Path, components: list[str]) -> Path | None:
 # tentava ate 3 bases (home, workspace, cwd) com listdir + match
 # case-insensitive — caro em sessoes que o LLM tenta multiplas variantes
 # do mesmo path. Cache mantem 256 entries; eviction natural via LRU.
+_SENTINEL = object()
+
 _FUZZY_CACHE_SIZE = 256
 _fuzzy_cache: dict[str, str | None] = {}
 _fuzzy_cache_order: list[str] = []
@@ -114,9 +116,6 @@ def _fuzzy_resolve(path: str) -> str | None:
         evicted = _fuzzy_cache_order.pop(0)
         _fuzzy_cache.pop(evicted, None)
     return result
-
-
-_SENTINEL = object()
 
 
 def _fuzzy_resolve_uncached(path: str) -> str | None:

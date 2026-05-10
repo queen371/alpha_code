@@ -277,8 +277,7 @@ def save_session(
     # Cleanup probabilistico (#D025): rodar `_cleanup_old_sessions` em
     # toda chamada faz glob + sorted desnecessario. ~10% das chamadas
     # mantem o tamanho do diretorio bounded sem custo per-save.
-    import secrets as _secrets
-    if _secrets.randbelow(10) == 0:
+    if secrets.randbelow(10) == 0:
         try:
             _cleanup_old_sessions()
         except OSError as e:

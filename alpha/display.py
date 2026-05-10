@@ -143,14 +143,14 @@ def print_tool_call(name: str, args: dict, safety: str = "safe") -> None:
         for key in ("path", "command", "query", "action", "pattern", "file", "code"):
             if key in args:
                 val = str(args[key])
-                if len(val) > 120:
-                    val = val[:117] + "..."
+                if len(val) > DISPLAY_PREVIEW_TRUNCATE:
+                    val = val[:DISPLAY_PREVIEW_TRUNCATE - 3] + "..."
                 args_str = f" {c(C.GRAY, val)}"
                 break
         if not args_str and args:
             first_val = str(next(iter(args.values())))
-            if len(first_val) > 120:
-                first_val = first_val[:117] + "..."
+            if len(first_val) > DISPLAY_PREVIEW_TRUNCATE:
+                first_val = first_val[:DISPLAY_PREVIEW_TRUNCATE - 3] + "..."
             args_str = f" {c(C.GRAY, first_val)}"
 
     safety_color = _SAFETY_COLORS.get(safety, C.YELLOW)

@@ -9,9 +9,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from .._registry import FileBackedRegistry
+from ..config import _PROJECT_ROOT
 from .loader import Skill, load_skill_file
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _SEARCH_PATHS = [
     _PROJECT_ROOT / "skills",
     Path.home() / ".alpha" / "skills",

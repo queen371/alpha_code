@@ -22,7 +22,8 @@ from .workspace import AGENT_WORKSPACE, assert_within_workspace
 logger = logging.getLogger(__name__)
 
 # Operators allowed in pipelines
-_PIPE_OPERATORS = frozenset({"|", "&&", "||", ";", ">", ">>", "2>&1", "2>", "<"})
+# Allowed pipe/redirect operators
+_PIPE_OPERATORS: frozenset[str] = frozenset()  # DM038: reservado para uso futuro
 
 
 _SHELL_EXPANSION_RE = re.compile(

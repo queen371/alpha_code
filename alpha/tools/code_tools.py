@@ -44,7 +44,7 @@ URL_PREFIXES = ("http://", "https://", "git+", "svn+", "ftp://", "/", "\\")
 _BLOCKED_MODULES = frozenset({
     # User-facing OS / process / FS modules.
     "os", "subprocess", "shutil", "sys", "importlib", "ctypes", "_ctypes",
-    "signal", "pathlib", "code", "multiprocessing", "webbrowser",
+    "signal", "code", "multiprocessing", "webbrowser",
     # Low-level OS interfaces — CPython implementation detail of `os` and
     # `subprocess`. Same capabilities, different name (#009 V1.2).
     "posix", "nt", "_posixsubprocess", "_winapi", "msvcrt",

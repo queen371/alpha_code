@@ -25,9 +25,8 @@ LIMITS = {
     "tool_result_max_chars": 12_000,
     "llm_timeout": 300,             # seconds per LLM call
     "max_messages": 500,            # hard cap antes de needs_compression
+    "subagent_max_iterations": 15,  # max iteracoes do sub-agent loop
 }
-# `subagent_max_iterations` vive em FEATURES (linha ~185) — `delegate_tools.py`
-# le de la. Manter dois lugares era drift garantido (#DM015 follow-up).
 
 MAX_ITERATIONS = LIMITS["max_iterations"]
 TOOL_RESULT_MAX_CHARS = LIMITS["tool_result_max_chars"]
@@ -210,7 +209,6 @@ FEATURES: dict = {
     # Gate fino sobre as tools de delegate (independente do master switch).
     "delegate_tool_enabled": True,
     "max_parallel_agents": 3,
-    "subagent_max_iterations": 15,
     # Cap total de tarefas em delegate_parallel — `max_parallel_agents`
     # controla concorrencia, nao total. Sem cap, o modelo pode submeter
     # array de 100 tasks * 15 iteracoes = 1500 chamadas LLM silenciosas.

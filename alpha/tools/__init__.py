@@ -9,7 +9,7 @@ Supports:
 
 Tool module index (where each tool lives, see #096):
 - file_tools.py    — read_file, write_file, edit_file, search_files,
-                     glob_files, list_directory, move_file, delete_file
+                     glob_files, list_directory
 - shell_tools.py   — execute_shell
 - pipeline_tools.py — execute_pipeline
 - code_tools.py    — execute_python, install_package
