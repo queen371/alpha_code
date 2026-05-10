@@ -25,13 +25,13 @@ import httpx
 
 from ._rate_limiter import acquire_llm_token as _rate_limit_acquire
 
+from .config import RETRY
 from .llm import DsmlStripper, _calc_backoff
 
 logger = logging.getLogger(__name__)
 
 ANTHROPIC_VERSION = "2023-06-01"
 DEFAULT_MAX_TOKENS = 8192
-_ANTHROPIC_RETRY_MAX = 3
 _TRANSIENT_HTTPX_ERRORS = (
     httpx.ConnectError,
     httpx.RemoteProtocolError,
@@ -254,7 +254,7 @@ async def stream_anthropic(
     client = await _get_client(timeout)
     last_error: str | None = None
 
-    for attempt in range(_ANTHROPIC_RETRY_MAX + 1):
+    for attempt in range(RETRY["llm"]["max_retries"] + 1):
         try:
             await _rate_limit_acquire("anthropic")
             async with client.stream(
@@ -331,11 +331,11 @@ async def stream_anthropic(
             last_error = f"{type(e).__name__}: {e}"
             # Once any token has been yielded to the caller the partial stream
             # is already committed downstream — replaying would duplicate it.
-            if yielded_any or attempt >= _ANTHROPIC_RETRY_MAX:
+            if yielded_any or attempt >= RETRY["llm"]["max_retries"]:
                 break
             backoff = _calc_backoff(attempt)
             logger.warning(
-                f"Anthropic transient error (attempt {attempt + 1}/{_ANTHROPIC_RETRY_MAX + 1}), "
+                f"Anthropic transient error (attempt {attempt + 1}/{RETRY["llm"]["max_retries"] + 1}), "
                 f"retrying in {backoff:.1f}s: {e}"
             )
             blocks = {}

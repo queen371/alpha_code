@@ -18,7 +18,7 @@ from ..net_utils import (
     validate_url as _validate_url,
     resolve_and_validate as _resolve_and_validate,
 )
-from ..config import TOOL_TIMEOUTS
+from ..config import RETRY, TOOL_TIMEOUTS
 from . import ToolDefinition, ToolSafety, register_tool
 
 logger = logging.getLogger(__name__)
@@ -26,13 +26,9 @@ logger = logging.getLogger(__name__)
 _MAX_RESPONSE_SIZE = 1_000_000  # 1MB
 _ALLOWED_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
 
-# Retry config (#057): metodos seguros (GET/HEAD/OPTIONS) podem retentar
-# erros transientes (connection reset, DNS hiccup) sem risco de duplicar
-# efeito. Metodos de escrita (POST/PUT/PATCH/DELETE) NUNCA retentam —
-# duplicar pagamentos / criacoes seria pior do que falhar uma vez.
-_RETRY_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
-_HTTP_MAX_RETRIES = 2  # ate 3 tentativas no total
-_HTTP_INITIAL_BACKOFF = 0.5
+# Retry config (#DM036): centralizado em config.RETRY["http"].
+# Metodos seguros (GET/HEAD/OPTIONS) podem retentar erros transientes
+# sem risco de duplicar efeito. Escrita NUNCA retenta.
 
 
 # #D008-PERF: aiohttp.ClientSession compartilhada por loop. Antes, cada
@@ -341,25 +337,25 @@ async def _http_request_with_retry(
     `transient` por `_http_request`.
     """
     method_upper = (method or "GET").upper()
-    if method_upper not in _RETRY_SAFE_METHODS:
+    if method_upper not in RETRY["http"]["safe_methods"]:
         return await _http_request(url, method, headers, body, timeout)
 
     last_result: dict = {}
-    for attempt in range(_HTTP_MAX_RETRIES + 1):
+    for attempt in range(RETRY["http"]["max_retries"] + 1):
         result = await _http_request(url, method, headers, body, timeout)
         if not result.get("transient"):
             return result
         last_result = result
-        if attempt < _HTTP_MAX_RETRIES:
-            backoff = _HTTP_INITIAL_BACKOFF * (2 ** attempt) * (1 + random.random() * 0.3)
+        if attempt < RETRY["http"]["max_retries"]:
+            backoff = RETRY["http"]["initial_backoff"] * (2 ** attempt) * (1 + random.random() * 0.3)
             logger.warning(
                 f"http_request transient error on {url} "
-                f"(attempt {attempt + 1}/{_HTTP_MAX_RETRIES + 1}), "
+                f"(attempt {attempt + 1}/{RETRY["http"]["max_retries"] + 1}), "
                 f"retrying in {backoff:.2f}s"
             )
             await asyncio.sleep(backoff)
     # Esgotou retries — retorna o ultimo erro com a info do retry budget.
-    last_result["retried"] = _HTTP_MAX_RETRIES + 1
+    last_result["retried"] = RETRY["http"]["max_retries"] + 1
     return last_result
 
 

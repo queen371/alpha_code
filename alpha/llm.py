@@ -18,7 +18,7 @@ import httpx
 
 from ._rate_limiter import acquire_llm_token as _rate_limit_acquire
 from ._security_log import sanitize_for_log
-from .config import LLM_TIMEOUT, get_provider_config
+from .config import LLM_TIMEOUT, RETRY, get_provider_config
 
 logger = logging.getLogger(__name__)
 
@@ -77,11 +77,8 @@ class DsmlStripper:
 
 # ─── Retry / Rate-limit config ───
 
-MAX_RETRIES = 3
-INITIAL_BACKOFF = 1.0  # seconds
-MAX_BACKOFF = 30.0
-BACKOFF_MULTIPLIER = 2.0
-RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+# ─── Retry / Rate-limit config ───
+# Lido de config.RETRY["llm"] (#DM036).
 
 # Smaller local models (Ollama-backed) hallucinate tool calls less often at
 # lower temperatures. Politica vive como flag `low_temperature` em
@@ -213,22 +210,22 @@ def _recover_tool_call_from_content(content: str) -> dict | None:
 
 
 def _calc_backoff(attempt: int, retry_after: float | None = None) -> float:
-    """Calculate backoff delay with exponential growth, jitter, capped at MAX_BACKOFF.
+    """Calculate backoff delay with exponential growth, jitter, capped at RETRY["llm"]["max_backoff"].
 
     Jitter prevents thundering herd: all clients back off at slightly different
     intervals instead of retrying in lockstep.
     """
     if retry_after is not None:
         # Add small jitter even to server-specified delays. Jitter pode
-        # ate 1.2x o base, entao precisamos do `min(..., MAX_BACKOFF)`
+        # ate 1.2x o base, entao precisamos do `min(..., RETRY["llm"]["max_backoff"])`
         # explicito (#D023): sem ele, o resultado podia exceder o cap em
         # ate 20% (ex: 30s -> 36s) violando o invariante anunciado.
-        base = min(retry_after, MAX_BACKOFF)
-        return min(base * (0.8 + random.random() * 0.4), MAX_BACKOFF)
-    delay = INITIAL_BACKOFF * (BACKOFF_MULTIPLIER ** attempt)
+        base = min(retry_after, RETRY["llm"]["max_backoff"])
+        return min(base * (0.8 + random.random() * 0.4), RETRY["llm"]["max_backoff"])
+    delay = RETRY["llm"]["initial_backoff"] * (RETRY["llm"]["backoff_multiplier"] ** attempt)
     # Full jitter: uniform random between 0 and calculated delay
     jittered = delay * (0.5 + random.random() * 0.5)
-    return min(jittered, MAX_BACKOFF)
+    return min(jittered, RETRY["llm"]["max_backoff"])
 
 
 async def stream_chat_with_tools(
@@ -288,7 +285,7 @@ async def stream_chat_with_tools(
 
     last_error = None
 
-    for attempt in range(MAX_RETRIES + 1):
+    for attempt in range(RETRY["llm"]["max_retries"] + 1):
         accumulated_content = ""
         dsml_stripper = DsmlStripper()
         # `reasoning_content` e o canal de "thinking" do DeepSeek-reasoner
@@ -312,11 +309,11 @@ async def stream_chat_with_tools(
                 headers=headers,
             ) as response:
                 # Handle retryable HTTP errors
-                if response.status_code in RETRYABLE_STATUS_CODES:
+                if response.status_code in RETRY["llm"]["retryable_status_codes"]:
                     error_body = await response.aread()
                     last_error = f"HTTP {response.status_code}"
 
-                    if attempt < MAX_RETRIES:
+                    if attempt < RETRY["llm"]["max_retries"]:
                         # Parse Retry-After header for rate limits
                         retry_after = None
                         ra_header = response.headers.get("retry-after")
@@ -328,7 +325,7 @@ async def stream_chat_with_tools(
 
                         delay = _calc_backoff(attempt, retry_after)
                         logger.warning(
-                            f"LLM {last_error} (attempt {attempt + 1}/{MAX_RETRIES + 1}), "
+                            f"LLM {last_error} (attempt {attempt + 1}/{RETRY["llm"]["max_retries"] + 1}), "
                             f"retrying in {delay:.1f}s"
                         )
                         if accumulated_content:
@@ -337,12 +334,12 @@ async def stream_chat_with_tools(
                         continue
 
                     # Max retries exhausted
-                    logger.error(f"LLM {last_error} after {MAX_RETRIES + 1} attempts")
+                    logger.error(f"LLM {last_error} after {RETRY["llm"]["max_retries"] + 1} attempts")
                     yield {
                         "type": "final",
                         "content": "",
                         "tool_calls": [],
-                        "error": f"{last_error} after {MAX_RETRIES + 1} attempts",
+                        "error": f"{last_error} after {RETRY["llm"]["max_retries"] + 1} attempts",
                     }
                     return
 
@@ -473,10 +470,10 @@ async def stream_chat_with_tools(
 
         except httpx.TimeoutException:
             last_error = f"LLM timeout ({LLM_TIMEOUT}s)"
-            if attempt < MAX_RETRIES:
+            if attempt < RETRY["llm"]["max_retries"]:
                 delay = _calc_backoff(attempt)
                 logger.warning(
-                    f"{last_error} (attempt {attempt + 1}/{MAX_RETRIES + 1}), "
+                    f"{last_error} (attempt {attempt + 1}/{RETRY["llm"]["max_retries"] + 1}), "
                     f"retrying in {delay:.1f}s"
                 )
                 if accumulated_content:
@@ -484,12 +481,12 @@ async def stream_chat_with_tools(
                 await asyncio.sleep(delay)
                 continue
 
-            logger.error(f"{last_error} after {MAX_RETRIES + 1} attempts")
+            logger.error(f"{last_error} after {RETRY["llm"]["max_retries"] + 1} attempts")
             yield {
                 "type": "final",
                 "content": accumulated_content,
                 "tool_calls": [],
-                "error": f"{last_error} after {MAX_RETRIES + 1} attempts",
+                "error": f"{last_error} after {RETRY["llm"]["max_retries"] + 1} attempts",
             }
             return
 
@@ -500,10 +497,10 @@ async def stream_chat_with_tools(
 
         except (ConnectionError, OSError) as e:
             last_error = f"Connection error: {e}"
-            if attempt < MAX_RETRIES:
+            if attempt < RETRY["llm"]["max_retries"]:
                 delay = _calc_backoff(attempt)
                 logger.warning(
-                    f"{last_error} (attempt {attempt + 1}/{MAX_RETRIES + 1}), "
+                    f"{last_error} (attempt {attempt + 1}/{RETRY["llm"]["max_retries"] + 1}), "
                     f"retrying in {delay:.1f}s"
                 )
                 if accumulated_content:
@@ -511,7 +508,7 @@ async def stream_chat_with_tools(
                 await asyncio.sleep(delay)
                 continue
 
-            logger.error(f"{last_error} after {MAX_RETRIES + 1} attempts")
+            logger.error(f"{last_error} after {RETRY["llm"]["max_retries"] + 1} attempts")
             yield {
                 "type": "final",
                 "content": accumulated_content,

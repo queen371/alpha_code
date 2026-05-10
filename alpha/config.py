@@ -32,6 +32,25 @@ MAX_ITERATIONS = LIMITS["max_iterations"]
 TOOL_RESULT_MAX_CHARS = LIMITS["tool_result_max_chars"]
 LLM_TIMEOUT = LIMITS["llm_timeout"]
 
+# Retry config centralizado (#DM036). LLM e HTTP usam backoff exponencial
+# com jitter, mas com parametros diferentes (LLM calls sao mais caras e
+# toleram retry mais agressivo; HTTP safe-methods podem retentar erros
+# transientes sem duplicar efeito).
+RETRY = {
+    "llm": {
+        "max_retries": 3,
+        "initial_backoff": 1.0,
+        "max_backoff": 30.0,
+        "backoff_multiplier": 2.0,
+        "retryable_status_codes": frozenset({429, 500, 502, 503, 504}),
+    },
+    "http": {
+        "max_retries": 2,
+        "initial_backoff": 0.5,
+        "safe_methods": frozenset({"GET", "HEAD", "OPTIONS"}),
+    },
+}
+
 # Loop detection (#085 V1.1): consts agrupadas em um dict para inspecao
 # uniforme (ex: ALPHA_LOOP_DETECT_DISABLE=1 pode levantar todos os
 # thresholds; testes podem mockar uma chave so). Lidas em alpha/agent.py.
