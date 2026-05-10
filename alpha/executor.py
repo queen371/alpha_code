@@ -101,11 +101,10 @@ def _format_result(result: dict, tool_name: str) -> str:
     """Truncate and format a tool result for inclusion in messages.
 
     Hot path: _cheap_len estima o tamanho serializado sem json.dumps
-    completo. Se passar do limite, strings sao cortadas por campo
-    em vez de fatiar JSON serializado bruto.
-    """
-    versao antiga fatiava no meio do JSON ja serializado, podendo cortar em
-    `\\uXXXX` ou em multi-byte UTF-8 e produzir saida com texto corrompido.
+    completo. Se passar do limite, strings sao cortadas por campo em vez
+    de fatiar JSON serializado bruto — a versao antiga fatiava no meio
+    do JSON e podia cortar em `\\uXXXX` ou em multi-byte UTF-8, produzindo
+    saida com texto corrompido.
     """
     # Drop underscore-prefixed keys: convention for UI-only fields (e.g.
     # `_previous_content` used to render the edit diff in the terminal,
