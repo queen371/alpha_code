@@ -73,11 +73,18 @@ pip install -e ".[dev]"       # adds pytest
 
 ## Update
 
-Easiest path — the bundled `alpha-update` script handles pull + reinstall + diff of `.env.example`:
+Easiest path — the bundled updater handles pull + reinstall + diff of `.env.example`:
 
 ```bash
+# Linux / macOS / WSL / Git Bash
 alpha-update              # jumps to latest master
 alpha-update v1.2.0       # pins to a specific release tag
+```
+
+```powershell
+# Windows (PowerShell, native — no bash needed)
+.\bin\alpha-update.ps1
+.\bin\alpha-update.ps1 v1.2.0
 ```
 
 Restart the REPL afterwards (`/exit` then `alpha` again).
@@ -87,7 +94,8 @@ Manual equivalent if you prefer:
 ```bash
 cd Alpha_Code
 git pull origin master
-source .venv/bin/activate
+source .venv/bin/activate         # Linux/macOS
+# .\.venv\Scripts\Activate.ps1    # Windows
 pip install -e . --upgrade
 ```
 
