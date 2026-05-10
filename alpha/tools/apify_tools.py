@@ -7,7 +7,7 @@ import asyncio
 
 import httpx
 
-from . import ToolDefinition, ToolSafety, register_tool
+from . import ToolCategory, ToolDefinition, ToolSafety, register_tool
 
 logger = logging.getLogger(__name__)
 
@@ -279,7 +279,7 @@ register_tool(
         # actors maliciosos no marketplace. Requer aprovacao humana.
         safety=ToolSafety.DESTRUCTIVE,
         executor=_run_actor,
-        category="scraping",
+        category=ToolCategory.SCRAPING,
     )
 )
 
@@ -308,6 +308,6 @@ register_tool(
         },
         safety=ToolSafety.SAFE,
         executor=_list_actors,
-        category="scraping",
+        category=ToolCategory.SCRAPING,
     )
 )

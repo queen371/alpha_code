@@ -4,7 +4,7 @@ import os
 import re
 import tempfile
 
-from . import ToolDefinition, ToolSafety, register_tool
+from . import ToolCategory, ToolDefinition, ToolSafety, register_tool
 from ._composite_helpers import _run_tool
 from .file_tools import _validate_path_no_symlink
 from .path_helpers import _validate_path
@@ -133,7 +133,7 @@ register_tool(
             "required": ["path", "search", "replace"],
         },
         safety=ToolSafety.DESTRUCTIVE,
-        category="composite",
+        category=ToolCategory.COMPOSITE,
         executor=_search_and_replace,
     )
 )

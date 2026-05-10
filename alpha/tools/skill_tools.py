@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import shutil
 
-from . import ToolDefinition, ToolSafety, register_tool
+from . import ToolCategory, ToolDefinition, ToolSafety, register_tool
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,6 @@ register_tool(
         },
         safety=ToolSafety.SAFE,
         executor=_load_skill,
-        category="skills",
+        category=ToolCategory.SKILLS,
     )
 )

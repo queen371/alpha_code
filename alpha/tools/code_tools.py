@@ -14,7 +14,7 @@ import re
 import sys
 import tempfile
 
-from . import ToolDefinition, ToolSafety, register_tool
+from . import ToolCategory, ToolDefinition, ToolSafety, register_tool
 from ._subprocess_helpers import SubprocessTimeoutError, run_subprocess_safe
 from ..config import TOOL_TIMEOUTS, TOOL_TIMEOUT_CAPS
 from .safe_env import get_safe_env
@@ -293,7 +293,7 @@ register_tool(
             "required": ["code"],
         },
         safety=ToolSafety.DESTRUCTIVE,
-        category="code",
+        category=ToolCategory.CODE,
         executor=_execute_python,
     )
 )
@@ -313,7 +313,7 @@ register_tool(
             "required": ["package"],
         },
         safety=ToolSafety.DESTRUCTIVE,
-        category="code",
+        category=ToolCategory.CODE,
         executor=_install_package,
     )
 )

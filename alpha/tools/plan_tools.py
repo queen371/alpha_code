@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import ToolDefinition, ToolSafety, register_tool
+from . import ToolCategory, ToolDefinition, ToolSafety, register_tool
 
 VALID_TODO_STATUSES = ("pending", "in_progress", "completed", "cancelled")
 
@@ -75,7 +75,7 @@ register_tool(
         },
         safety=ToolSafety.DESTRUCTIVE,  # forces the approval gate
         executor=_present_plan,
-        category="planning",
+        category=ToolCategory.GENERAL,
     )
 )
 
@@ -164,6 +164,6 @@ register_tool(
         },
         safety=ToolSafety.SAFE,
         executor=_todo_write,
-        category="planning",
+        category=ToolCategory.GENERAL,
     )
 )

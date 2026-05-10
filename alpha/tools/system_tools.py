@@ -11,7 +11,7 @@ import logging
 import shutil
 import subprocess
 
-from . import ToolDefinition, ToolSafety, register_tool
+from . import ToolCategory, ToolDefinition, ToolSafety, register_tool
 
 logger = logging.getLogger(__name__)
 
@@ -288,7 +288,7 @@ register_tool(
         # Combinado com http_request/web_search auto-aprovados, leitura
         # silenciosa permite exfil. Promovido em DEEP_SECURITY #D103.
         safety=ToolSafety.DESTRUCTIVE,
-        category="system",
+        category=ToolCategory.SYSTEM,
         executor=_clipboard_read,
     )
 )
@@ -308,7 +308,7 @@ register_tool(
             "required": ["content"],
         },
         safety=ToolSafety.DESTRUCTIVE,
-        category="system",
+        category=ToolCategory.SYSTEM,
         executor=_clipboard_write,
     )
 )
@@ -329,7 +329,7 @@ register_tool(
             },
         },
         safety=ToolSafety.SAFE,
-        category="system",
+        category=ToolCategory.SYSTEM,
         executor=_screenshot,
     )
 )
@@ -373,7 +373,7 @@ register_tool(
             "required": ["message"],
         },
         safety=ToolSafety.SAFE,
-        category="system",
+        category=ToolCategory.SYSTEM,
         executor=_notify_user,
     )
 )

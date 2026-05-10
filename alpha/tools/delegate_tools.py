@@ -6,7 +6,7 @@ Supports single delegation (delegate_task) and parallel delegation
 Apos #082 split: helpers extraidos para _delegate_core.py.
 """
 
-from . import ToolDefinition, ToolSafety, register_tool
+from . import ToolCategory, ToolDefinition, ToolSafety, register_tool
 
 from ._delegate_core import (
     SUBAGENT_DESTRUCTIVE_BLOCKLIST,
@@ -346,7 +346,7 @@ register_tool(
         },
         safety=ToolSafety.DESTRUCTIVE,
         executor=_delegate_task,
-        category="agent",
+        category=ToolCategory.AGENT,
     )
 )
 
@@ -389,6 +389,6 @@ register_tool(
         },
         safety=ToolSafety.DESTRUCTIVE,
         executor=_delegate_parallel,
-        category="agent",
+        category=ToolCategory.AGENT,
     )
 )

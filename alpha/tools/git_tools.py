@@ -12,7 +12,7 @@ import re
 import shlex
 from pathlib import Path
 
-from . import ToolDefinition, ToolSafety, register_tool
+from . import ToolCategory, ToolDefinition, ToolSafety, register_tool
 from ._subprocess_helpers import SubprocessTimeoutError, run_subprocess_safe
 from ..config import TOOL_TIMEOUTS
 from .safe_env import get_safe_env
@@ -411,7 +411,7 @@ register_tool(
             "required": ["action"],
         },
         safety=ToolSafety.DESTRUCTIVE,
-        category="git",
+        category=ToolCategory.GIT,
         executor=_git_operation,
     )
 )

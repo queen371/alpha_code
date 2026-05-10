@@ -6,7 +6,7 @@ instead of relying on the pre-loop web search phase.
 
 import logging
 
-from . import ToolDefinition, ToolSafety, register_tool
+from . import ToolCategory, ToolDefinition, ToolSafety, register_tool
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +94,6 @@ register_tool(
         },
         safety=ToolSafety.SAFE,
         executor=_web_search,
-        category="search",
+        category=ToolCategory.SEARCH,
     )
 )

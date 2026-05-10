@@ -6,7 +6,7 @@ import shlex
 from pathlib import Path
 
 from .._platform import IS_WINDOWS
-from . import ToolDefinition, ToolSafety, register_tool
+from . import ToolCategory, ToolDefinition, ToolSafety, register_tool
 from ._subprocess_helpers import SubprocessTimeoutError, run_subprocess_safe
 from ..config import TOOL_TIMEOUTS
 from .safe_env import get_safe_env
@@ -295,7 +295,7 @@ register_tool(
             "required": ["command"],
         },
         safety=ToolSafety.DESTRUCTIVE,
-        category="shell",
+        category=ToolCategory.SHELL,
         executor=_execute_shell,
     )
 )

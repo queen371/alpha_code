@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import ToolDefinition, ToolSafety, register_tool
+from . import ToolCategory, ToolDefinition, ToolSafety, register_tool
 from .browser_session import (
     PLAYWRIGHT_AVAILABLE,
     BrowserSession,
@@ -501,7 +501,7 @@ def _reg(name: str, desc: str, params: dict, executor, safety: ToolSafety):
             description=desc,
             parameters=params,
             safety=safety,
-            category="browser",
+            category=ToolCategory.BROWSER,
             executor=executor,
         )
     )

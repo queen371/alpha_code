@@ -19,7 +19,7 @@ from ..net_utils import (
     resolve_and_validate as _resolve_and_validate,
 )
 from ..config import RETRY, TOOL_TIMEOUTS
-from . import ToolDefinition, ToolSafety, register_tool
+from . import ToolCategory, ToolDefinition, ToolSafety, register_tool
 
 logger = logging.getLogger(__name__)
 
@@ -397,7 +397,7 @@ register_tool(
             "required": ["url"],
         },
         safety=ToolSafety.DESTRUCTIVE,
-        category="network",
+        category=ToolCategory.NETWORK,
         executor=_http_request_with_retry,
     )
 )

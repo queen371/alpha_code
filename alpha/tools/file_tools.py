@@ -8,7 +8,7 @@ import re
 import shutil
 from pathlib import Path
 
-from . import ToolDefinition, ToolSafety, register_tool
+from . import ToolCategory, ToolDefinition, ToolSafety, register_tool
 from .path_helpers import (
     _fuzzy_resolve,
     _validate_path,
@@ -579,7 +579,7 @@ register_tool(
             "required": ["path"],
         },
         safety=ToolSafety.SAFE,
-        category="filesystem",
+        category=ToolCategory.FILESYSTEM,
         executor=_read_file,
     )
 )
@@ -600,7 +600,7 @@ register_tool(
             "required": [],
         },
         safety=ToolSafety.SAFE,
-        category="filesystem",
+        category=ToolCategory.FILESYSTEM,
         executor=_list_directory,
     )
 )
@@ -627,7 +627,7 @@ register_tool(
             "required": ["pattern"],
         },
         safety=ToolSafety.SAFE,
-        category="filesystem",
+        category=ToolCategory.FILESYSTEM,
         executor=_search_files,
     )
 )
@@ -649,7 +649,7 @@ register_tool(
             "required": ["pattern"],
         },
         safety=ToolSafety.SAFE,
-        category="filesystem",
+        category=ToolCategory.FILESYSTEM,
         executor=_glob_files,
     )
 )
@@ -670,7 +670,7 @@ register_tool(
             "required": ["path", "content"],
         },
         safety=ToolSafety.DESTRUCTIVE,
-        category="filesystem",
+        category=ToolCategory.FILESYSTEM,
         executor=_write_file,
     )
 )
@@ -695,7 +695,7 @@ register_tool(
             "required": ["path", "old_text", "new_text"],
         },
         safety=ToolSafety.DESTRUCTIVE,
-        category="filesystem",
+        category=ToolCategory.FILESYSTEM,
         executor=_edit_file,
     )
 )

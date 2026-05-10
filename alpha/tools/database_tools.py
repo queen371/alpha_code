@@ -19,7 +19,7 @@ from ..net_utils import (
     is_private_ip as _is_private_ip,
     resolve_and_validate as _resolve_and_validate,
 )
-from . import ToolDefinition, ToolSafety, register_tool
+from . import ToolCategory, ToolDefinition, ToolSafety, register_tool
 from ..config import TOOL_TIMEOUTS
 from .workspace import AGENT_WORKSPACE, assert_within_workspace
 
@@ -509,7 +509,7 @@ register_tool(
             "required": ["connection", "query"],
         },
         safety=ToolSafety.DESTRUCTIVE,
-        category="database",
+        category=ToolCategory.DATABASE,
         executor=_query_database,
     )
 )
@@ -535,7 +535,7 @@ register_tool(
             "required": ["connection"],
         },
         safety=ToolSafety.SAFE,
-        category="database",
+        category=ToolCategory.DATABASE,
         executor=_list_tables,
     )
 )
@@ -565,7 +565,7 @@ register_tool(
             "required": ["connection", "table"],
         },
         safety=ToolSafety.SAFE,
-        category="database",
+        category=ToolCategory.DATABASE,
         executor=_describe_table,
     )
 )

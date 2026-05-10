@@ -13,7 +13,7 @@ import re
 import shlex
 from pathlib import Path
 
-from . import ToolDefinition, ToolSafety, register_tool
+from . import ToolCategory, ToolDefinition, ToolSafety, register_tool
 from .path_helpers import _validate_path_no_symlink
 from .safe_env import get_safe_env
 from ..config import TOOL_TIMEOUTS
@@ -465,7 +465,7 @@ register_tool(
             "required": ["pipeline"],
         },
         safety=ToolSafety.DESTRUCTIVE,
-        category="shell",
+        category=ToolCategory.SHELL,
         executor=_execute_pipeline,
     )
 )

@@ -2,7 +2,7 @@
 
 import asyncio
 
-from . import ToolDefinition, ToolSafety, register_tool
+from . import ToolCategory, ToolDefinition, ToolSafety, register_tool
 from ._composite_helpers import _run_tool, _violation
 from ._composite_tests import _run_tests
 from .path_helpers import _validate_path
@@ -68,7 +68,7 @@ register_tool(
             },
         },
         safety=ToolSafety.SAFE,
-        category="composite",
+        category=ToolCategory.COMPOSITE,
         executor=_deploy_check,
     )
 )
