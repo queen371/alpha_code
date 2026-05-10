@@ -20,6 +20,7 @@ from ..net_utils import (
     resolve_and_validate as _resolve_and_validate,
 )
 from . import ToolDefinition, ToolSafety, register_tool
+from ..config import TOOL_TIMEOUTS
 from .workspace import AGENT_WORKSPACE, assert_within_workspace
 
 logger = logging.getLogger(__name__)
@@ -296,7 +297,6 @@ async def _query_sqlite(db_path: str, query: str, read_only: bool) -> dict:
     # #D005: sem `wait_for`, uma query SQLite que trava (lock contention,
     # corrupted page) pendurava o agent indefinidamente. Cap de 30s alinha
     # com TOOL_TIMEOUTS["database"].
-    from ..config import TOOL_TIMEOUTS
     db_timeout = TOOL_TIMEOUTS.get("database", 30)
     loop = asyncio.get_running_loop()
     try:
@@ -369,7 +369,6 @@ async def _query_database(
             return {"error": "asyncpg não instalado. Execute: pip install asyncpg"}
 
         # #048: cap dedicado para fetch (nao apenas pool acquire).
-        from ..config import TOOL_TIMEOUTS
         fetch_timeout = TOOL_TIMEOUTS.get("database", 30)
         try:
             pool = await asyncio.wait_for(_get_pg_pool(connection), timeout=10)
@@ -446,7 +445,6 @@ async def _describe_table(connection: str, table: str, db_type: str = "sqlite") 
         except ImportError:
             return {"error": "asyncpg não instalado. Execute: pip install asyncpg"}
 
-        from ..config import TOOL_TIMEOUTS
         fetch_timeout = TOOL_TIMEOUTS.get("database", 30)
         try:
             pool = await asyncio.wait_for(_get_pg_pool(connection), timeout=10)

@@ -18,6 +18,7 @@ from ..net_utils import (
     validate_url as _validate_url,
     resolve_and_validate as _resolve_and_validate,
 )
+from ..config import TOOL_TIMEOUTS
 from . import ToolDefinition, ToolSafety, register_tool
 
 logger = logging.getLogger(__name__)
@@ -100,7 +101,6 @@ async def _http_request(
     timeout: int | None = None,
 ) -> dict:
     """Make an HTTP request."""
-    from ..config import TOOL_TIMEOUTS
     if timeout is None:
         timeout = TOOL_TIMEOUTS.get("network", 30)
 

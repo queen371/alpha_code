@@ -14,6 +14,7 @@ from pathlib import Path
 
 from . import ToolDefinition, ToolSafety, register_tool
 from ._subprocess_helpers import SubprocessTimeoutError, run_subprocess_safe
+from ..config import TOOL_TIMEOUTS
 from .safe_env import get_safe_env
 from .workspace import AGENT_WORKSPACE, assert_within_workspace
 
@@ -89,7 +90,6 @@ _ALL_ACTIONS = _SAFE_ACTIONS | _DESTRUCTIVE_ACTIONS
 
 async def _run_git(args: list[str], cwd: str, timeout: int | None = None) -> dict:
     """Run a git command and return result."""
-    from ..config import TOOL_TIMEOUTS
     if timeout is None:
         timeout = TOOL_TIMEOUTS.get("git", 30)
     cmd = ["git"] + args

@@ -5,8 +5,10 @@ import re
 import shlex
 from pathlib import Path
 
+from .._platform import IS_WINDOWS
 from . import ToolDefinition, ToolSafety, register_tool
 from ._subprocess_helpers import SubprocessTimeoutError, run_subprocess_safe
+from ..config import TOOL_TIMEOUTS
 from .safe_env import get_safe_env
 from .workspace import AGENT_WORKSPACE, assert_within_workspace
 
@@ -65,6 +67,24 @@ _HARD_BLOCKED_PATTERNS = [
     r"\bufw\s+(reset|disable)\b",
     # find with -fprint/-fprintf writes output to arbitrary files (sandbox escape)
     r"\bfind\s+.*-fprintf?\s",
+    # ─── Windows destructive patterns (defesa em profundidade) ───
+    # HARD_BLOCKED_RE ja compila com re.IGNORECASE — flags inline `(?i)`
+    # invalidariam a alternation, entao escrevemos lower.
+    r"\b(?:rmdir|rd)\s+(?:/s\b|/q\s+/s\b|/s\s+/q\b)",
+    r"\bdel\s+(?:/[fsq]\s*)*?/s\b",
+    r"\bRemove-Item\b[^\n]*-Recurse",
+    # Disk format / partition
+    r"\bformat\s+[a-z]:\s",
+    r"\bdiskpart\b",
+    # Power / shutdown (Windows)
+    r"\bshutdown\s+/[rstpgha]",
+    r"\b(Stop-Computer|Restart-Computer)\b",
+    # Registry destruction
+    r"\breg\s+delete\b",
+    r"\bRemove-ItemProperty\b",
+    # User/account destruction
+    r"\bnet\s+user\s+\S+\s+/delete",
+    r"\bRemove-LocalUser\b",
 ]
 
 # #D020: 27 regex viraram uma alternation unica. Antes `_validate_command`
@@ -93,7 +113,12 @@ def _validate_command(command: str) -> str | None:
     if HARD_BLOCKED_RE.search(command):
         return "Comando bloqueado por segurança (padrão destrutivo detectado)"
 
-    # Syntactic sanity check per pipe segment
+    # No Windows, cmd.exe parseia o comando — shlex POSIX quebra paths
+    # com backslash e nao reflete a sintaxe de cmd. Newline + HARD_BLOCKED
+    # ja foram checados acima; nao temos mais o que validar aqui.
+    if IS_WINDOWS:
+        return None
+
     segments = command.split("|") if "|" in command else [command]
     for segment in segments:
         segment = segment.strip()
@@ -116,9 +141,29 @@ _GUI_COMMANDS = frozenset({"xdg-open", "xdg-mime", "notify-send"})
 # ─── Tool ───
 
 
+async def _execute_shell_windows(command: str, cwd: str, timeout: int) -> dict:
+    """Execute via cmd.exe /c — necessario pra builtins (`dir`, `type`,
+    `echo`), pipes e redirects, que `subprocess_exec` direto nao parseia.
+    Injection vem so da string do comando, ja validada via HARD_BLOCKED_RE.
+    """
+    try:
+        r = await run_subprocess_safe(
+            "cmd.exe", "/c", command, timeout=timeout, cwd=cwd,
+        )
+    except SubprocessTimeoutError:
+        return {
+            "error": f"Comando excedeu o timeout de {timeout}s",
+            "timeout": True,
+        }
+    return {
+        "exit_code": r.returncode,
+        "stdout": r.stdout.decode(errors="replace")[:15000],
+        "stderr": r.stderr.decode(errors="replace")[:5000],
+    }
+
+
 async def _execute_shell(command: str, cwd: str = None, timeout: int | None = None) -> dict:
     """Execute a shell command with timeout."""
-    from ..config import TOOL_TIMEOUTS
     if timeout is None:
         timeout = TOOL_TIMEOUTS.get("shell", 30)
     # Validate command
@@ -141,6 +186,9 @@ async def _execute_shell(command: str, cwd: str = None, timeout: int | None = No
     timeout = min(timeout, TOOL_TIMEOUT_CAPS.get("shell", 300))
 
     try:
+        if IS_WINDOWS:
+            return await _execute_shell_windows(command, cwd, timeout)
+
         try:
             cmd_parts = shlex.split(command)
         except ValueError as e:

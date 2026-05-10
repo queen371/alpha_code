@@ -16,6 +16,7 @@ from pathlib import Path
 from . import ToolDefinition, ToolSafety, register_tool
 from .path_helpers import _validate_path_no_symlink
 from .safe_env import get_safe_env
+from ..config import TOOL_TIMEOUTS
 from .shell_tools import HARD_BLOCKED_RE
 from .workspace import AGENT_WORKSPACE, assert_within_workspace
 
@@ -349,7 +350,6 @@ async def _execute_pipe_chain(
 
 async def _execute_pipeline(pipeline: str, cwd: str = None, timeout: int | None = None) -> dict:
     """Execute a shell pipeline with pipes, redirects, and operators — sem shell."""
-    from ..config import TOOL_TIMEOUTS
     if timeout is None:
         timeout = TOOL_TIMEOUTS.get("pipeline", 120)
 
