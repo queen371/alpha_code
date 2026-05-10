@@ -1,6 +1,6 @@
 """Read images and text from the system clipboard.
 
-Works on X11 (xclip) and Wayland (wl-paste). Returns None if the
+Works on X11 (xclip), Wayland (wl-paste), and Windows (PIL). Returns None if the
 clipboard has no image (or the relevant binary is not installed).
 """
 
@@ -17,7 +17,10 @@ CLIPBOARD_TIMEOUT = 3  # seconds — clipboard reads should be near-instant
 
 
 def _detect_display_server() -> str:
-    """Return 'wayland' | 'x11' | 'unknown'."""
+    """Return 'windows' | 'wayland' | 'x11' | 'unknown'."""
+    import sys as _sys
+    if _sys.platform == "win32":
+        return "windows"
     if os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland":
         return "wayland"
     if os.environ.get("WAYLAND_DISPLAY"):
@@ -77,6 +80,27 @@ def _xclip_paste_image() -> bytes | None:
         return None
 
 
+def _win_paste_image() -> bytes | None:
+    """Read image from Windows clipboard via PIL.ImageGrab."""
+    try:
+        from PIL import ImageGrab
+        import io
+        img = ImageGrab.grabclipboard()
+        if img is None:
+            return None
+        # PIL may return a list of filenames if files are copied
+        if isinstance(img, list):
+            return None
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
+    except ImportError:
+        logger.debug("PIL not installed; clipboard image read unavailable on Windows")
+    except Exception as e:
+        logger.debug("Windows clipboard image read failed: %s", e)
+    return None
+
+
 def read_image_from_clipboard() -> tuple[bytes, str] | None:
     """Read an image from the system clipboard.
 
@@ -85,6 +109,12 @@ def read_image_from_clipboard() -> tuple[bytes, str] | None:
     read fails. Tries Wayland first, then X11.
     """
     server = _detect_display_server()
+
+    if server == "windows":
+        data = _win_paste_image()
+        if data:
+            return data, _guess_media_type(data)
+        return None
 
     if server == "wayland":
         data = _wl_paste_image()

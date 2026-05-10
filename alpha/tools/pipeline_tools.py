@@ -17,6 +17,7 @@ from . import ToolCategory, ToolDefinition, ToolSafety, register_tool
 from .path_helpers import _validate_path_no_symlink
 from .safe_env import get_safe_env
 from ..config import TOOL_TIMEOUTS
+from .._platform import IS_WINDOWS
 from .shell_tools import HARD_BLOCKED_RE
 from .workspace import AGENT_WORKSPACE, assert_within_workspace
 
@@ -58,12 +59,17 @@ def _validate_pipeline(pipeline: str) -> str | None:
         cmd_part = re.split(r"\s*(?:>>?|2>>?|<)\s*", segment)[0].strip()
         if not cmd_part:
             continue
-        try:
-            parts = shlex.split(cmd_part)
+        if IS_WINDOWS:
+            parts = cmd_part.split()
             if not parts:
                 continue
-        except ValueError:
-            return f"Segmento malformado no pipeline: {segment}"
+        else:
+            try:
+                parts = shlex.split(cmd_part)
+                if not parts:
+                    continue
+            except ValueError:
+                return f"Segmento malformado no pipeline: {segment}"
 
     return None
 
@@ -114,7 +120,10 @@ def _parse_segment(segment: str) -> tuple[list[str], dict[str, str]]:
             redirects["stdin"] = target
 
     cmd_str = _REDIRECT_RE.sub("", segment).strip()
-    parts = shlex.split(cmd_str) if cmd_str else []
+    if IS_WINDOWS:
+        parts = cmd_str.split() if cmd_str else []
+    else:
+        parts = shlex.split(cmd_str) if cmd_str else []
     return parts, redirects
 
 
@@ -378,6 +387,11 @@ async def _execute_pipeline(pipeline: str, cwd: str = None, timeout: int | None 
     env = get_safe_env()
 
     try:
+        if IS_WINDOWS:
+            from ._subprocess_helpers import SubprocessTimeoutError, run_subprocess_safe
+            from .shell_tools import _execute_shell_windows
+            return await _execute_shell_windows(pipeline, cwd, timeout)
+
         # Separar por operadores lógicos (&&, ||, ;) preservando o operador
         logical_segments = re.split(r"\s*(&&|\|\||;)\s*", pipeline)
 

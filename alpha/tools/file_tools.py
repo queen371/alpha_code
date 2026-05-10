@@ -478,7 +478,7 @@ async def _write_file(path: str, content: str) -> dict:
             raise PermissionError(err)
         # Atomic write: O_NOFOLLOW prevents symlink race between validate and open
         data = content.encode("utf-8")
-        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
+        flags = (os.O_WRONLY | os.O_CREAT | os.O_TRUNC) | (os.O_NOFOLLOW if hasattr(os,"O_NOFOLLOW") else 0)
         fd = os.open(str(p), flags, 0o644)
         try:
             os.write(fd, data)
@@ -511,7 +511,7 @@ async def _edit_file(path: str, old_text: str, new_text: str) -> dict:
     try:
         # O_NOFOLLOW closes the TOCTOU race where a symlink could be created
         # between the path validation above and this read.
-        fd = os.open(str(p), os.O_RDONLY | os.O_NOFOLLOW)
+        fd = os.open(str(p), os.O_RDONLY | (os.O_NOFOLLOW if hasattr(os,"O_NOFOLLOW") else 0))
         try:
             size = os.fstat(fd).st_size
             if size > _EDIT_MAX_BYTES:
@@ -534,7 +534,7 @@ async def _edit_file(path: str, old_text: str, new_text: str) -> dict:
             raise PermissionError(err)
         # Atomic write with O_NOFOLLOW to prevent symlink race
         data = updated.encode("utf-8")
-        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
+        flags = (os.O_WRONLY | os.O_CREAT | os.O_TRUNC) | (os.O_NOFOLLOW if hasattr(os,"O_NOFOLLOW") else 0)
         fd = os.open(str(p), flags, 0o644)
         try:
             os.write(fd, data)

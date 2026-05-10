@@ -35,26 +35,37 @@ def test_guess_media_type_unknown_defaults_to_png():
 
 class TestDetectDisplayServer:
     def test_wayland_via_session_type(self, monkeypatch):
+        monkeypatch.setattr("sys.platform", "linux")
         monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
         monkeypatch.delenv("DISPLAY", raising=False)
         assert clipboard._detect_display_server() == "wayland"
 
     def test_wayland_via_wayland_display(self, monkeypatch):
+        monkeypatch.setattr("sys.platform", "linux")
         monkeypatch.delenv("XDG_SESSION_TYPE", raising=False)
         monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
         assert clipboard._detect_display_server() == "wayland"
 
     def test_x11_when_only_display_set(self, monkeypatch):
+        monkeypatch.setattr("sys.platform", "linux")
         monkeypatch.delenv("XDG_SESSION_TYPE", raising=False)
         monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
         monkeypatch.setenv("DISPLAY", ":0")
         assert clipboard._detect_display_server() == "x11"
 
     def test_unknown_when_nothing_set(self, monkeypatch):
+        monkeypatch.setattr("sys.platform", "linux")
         monkeypatch.delenv("XDG_SESSION_TYPE", raising=False)
         monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
         monkeypatch.delenv("DISPLAY", raising=False)
         assert clipboard._detect_display_server() == "unknown"
+
+    def test_windows_platform_detection(self, monkeypatch):
+        """On Windows, return 'windows' regardless of display env vars."""
+        monkeypatch.setattr("sys.platform", "win32")
+        monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+        monkeypatch.setenv("DISPLAY", ":0")
+        assert clipboard._detect_display_server() == "windows"
 
 
 class TestReadImageReturnsNone:

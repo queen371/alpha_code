@@ -17,8 +17,12 @@ logger = logging.getLogger(__name__)
 
 
 def _detect_display_server() -> str:
-    """Detect X11 vs Wayland."""
+    """Detect X11 vs Wayland vs Windows."""
     import os
+    import sys
+
+    if sys.platform == "win32":
+        return "windows"
 
     session = os.environ.get("XDG_SESSION_TYPE", "").lower()
     if session == "wayland":
@@ -35,7 +39,9 @@ async def _clipboard_read() -> dict:
     """Read from system clipboard."""
     display = _detect_display_server()
 
-    if display == "wayland":
+    if display == "windows":
+        cmd = ["powershell", "-Command", "Get-Clipboard"]
+    elif display == "wayland":
         cmd = ["wl-paste"]
     elif display == "x11":
         cmd = ["xclip", "-selection", "clipboard", "-o"]
@@ -79,7 +85,9 @@ async def _clipboard_write(content: str) -> dict:
     """Write to system clipboard."""
     display = _detect_display_server()
 
-    if display == "wayland":
+    if display == "windows":
+        cmd = ["powershell", "-Command", "$input | Set-Clipboard"]
+    elif display == "wayland":
         cmd = ["wl-copy"]
     elif display == "x11":
         cmd = ["xclip", "-selection", "clipboard"]
@@ -136,8 +144,9 @@ async def _screenshot(region: str = "full") -> dict:
     # pre-creates the dir or plants a symlink in /tmp sticky-bit.
     import atexit as _atexit
     import shutil as _shutil
+    uid = os.getuid() if hasattr(os, "getuid") else 0
     screenshot_dir = Path(tempfile.mkdtemp(
-        prefix=f"alpha_screenshots_{os.getuid()}_",
+        prefix=f"alpha_screenshots_{uid}_",
         dir=tempfile.gettempdir(),
     ))
     # mkdtemp creates with 0o700 already, but ensure it stays private.
@@ -150,6 +159,22 @@ async def _screenshot(region: str = "full") -> dict:
 
     # Try different screenshot tools
     tools_to_try = []
+
+    # Windows: use PIL.ImageGrab (no external deps beyond Pillow)
+    import sys as _sys
+    if _sys.platform == "win32":
+        try:
+            from PIL import ImageGrab
+            img = ImageGrab.grab(all_screens=(region == "full"))
+            img.save(str(filepath), "PNG")
+            return {
+                "path": str(filepath),
+                "size_bytes": filepath.stat().st_size,
+                "region": region,
+                "tool_used": "PIL.ImageGrab",
+            }
+        except ImportError:
+            pass  # fall through to error message below
 
     if region == "active_window":
         # Resolve active window ID first (shell expansion doesn't work in subprocess_exec)
@@ -230,6 +255,37 @@ async def _notify_user(
 ) -> dict:
     """Send a notification to the user."""
     if channel == "desktop":
+        import sys as _sys
+        if _sys.platform == "win32":
+            # PowerShell toast notification (Win 10+). Falls back to msg.exe
+            # for terminal sessions. Both are fire-and-forget.
+            ps = f'''
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+$tpl = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+$tpl.GetElementsByTagName('text').Item(0).AppendChild($tpl.CreateTextNode('{title}')) | Out-Null
+$tpl.GetElementsByTagName('text').Item(1).AppendChild($tpl.CreateTextNode('{message}')) | Out-Null
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('ALPHA').Show([Windows.UI.Notifications.ToastNotification]::new($tpl))
+'''
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "powershell", "-Command", ps,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=5)
+                if proc.returncode != 0:
+                    return {"error": f"Falha ao enviar notificação: {stderr.decode(errors='replace')}"}
+                return {"sent": True, "channel": "desktop", "urgency": urgency}
+            except asyncio.CancelledError:
+                proc.kill()
+                try:
+                    await proc.wait()
+                except Exception:
+                    pass
+                raise
+            except Exception as e:
+                return {"error": str(e)}
+
         if not shutil.which("notify-send"):
             return {"error": "notify-send não encontrado. Instale: libnotify-bin"}
 

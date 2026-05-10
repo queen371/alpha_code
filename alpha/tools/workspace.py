@@ -15,6 +15,9 @@ _FORBIDDEN_WORKSPACES = frozenset({
     Path("/home"), Path("/root"), Path("/tmp"), Path("/bin"),
     Path("/sbin"), Path("/lib"), Path("/opt"), Path("/dev"),
     Path("/proc"), Path("/sys"),
+    # Windows system paths
+    Path("C:/Windows"), Path("C:/Windows/System32"),
+    Path("C:/Program Files"), Path("C:/Program Files (x86)"),
 })
 
 _raw_workspace = Path(os.getenv("AGENT_WORKSPACE", os.getcwd())).resolve()

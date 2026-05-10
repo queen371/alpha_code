@@ -245,11 +245,14 @@ def _is_single_command_safe(cmd_str: str) -> bool:
         return False
 
     try:
-        parts = shlex.split(cmd_str)
+        if IS_WINDOWS:
+            parts = cmd_str.split()
+        else:
+            parts = shlex.split(cmd_str)
         if not parts:
             return False
 
-        if IS_WINDOWS:
+        if False:
             # `Path.stem` strips a extensao (.exe/.cmd/.bat/.ps1) e .lower()
             # bate com `_SAFE_SHELL_COMMANDS_WIN_LOWER` — cmdlets/builtins
             # do Windows sao case-insensitive.
