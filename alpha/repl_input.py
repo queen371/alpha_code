@@ -28,6 +28,7 @@ from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style
 
+from ._platform import use_simple_input
 from .clipboard import read_image_from_clipboard
 
 logger = logging.getLogger(__name__)
@@ -258,12 +259,31 @@ def _get_session() -> PromptSession:
     return _SESSION
 
 
+def _read_input_simple(prompt_ansi: str) -> tuple[str, list[Path]]:
+    """Fallback `input()` pra Windows legacy (conhost antigo, PowerShell ISE)
+    onde o framed zone do prompt_toolkit nao renderiza e o usuario digita
+    no escuro. Perde Ctrl+V e shift+tab toggle, mas funciona.
+    """
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+    try:
+        text = input(prompt_ansi)
+    except UnicodeDecodeError:
+        # Codepage exotico (cp437 etc.) com bytes nao decodificaveis pelo
+        # locale; re-le como bytes brutos com decode lossy.
+        text = sys.stdin.readline().rstrip("\n")
+    return text, []
+
+
 def read_input(prompt_ansi: str) -> tuple[str, list[Path]]:
     """Read a line from the user. Returns (text, image_paths).
 
     Raises EOFError on Ctrl+D and KeyboardInterrupt on Ctrl+C — same as
     the builtin `input()`.
     """
+    if use_simple_input():
+        return _read_input_simple(prompt_ansi)
+
     # Top frame border + spacer above the prompt — pairs with the bottom
     # border emitted via `_bottom_toolbar` to give the input area a
     # demarcated "input box" feel (mirrors Claude Code's frame).

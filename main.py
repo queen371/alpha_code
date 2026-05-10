@@ -14,6 +14,11 @@ import os
 import sys
 import textwrap
 
+# init_console DEVE rodar antes de `from alpha.display` — senao os
+# primeiros ANSI escapes saem pro terminal Windows sem traducao.
+from alpha._platform import init_console
+init_console()
+
 from alpha.agents import get_agent
 from alpha.attachments import build_user_content
 from alpha.ocr import ocr_images_sync

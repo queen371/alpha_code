@@ -14,6 +14,7 @@ import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
+from ._platform import IS_WINDOWS
 from .settings import find_config_file, read_json
 
 logger = logging.getLogger(__name__)
@@ -106,6 +107,47 @@ SAFE_SHELL_COMMANDS = frozenset(
     }
 )
 
+# Windows allowlist — consultada so quando IS_WINDOWS. `del`/`rmdir`/`move`/
+# `copy` ficam DE FORA pelo mesmo motivo de `rm`/`mv`/`cp` no Unix:
+# atravessam o workspace sem validacao de source.
+SAFE_SHELL_COMMANDS_WIN = frozenset(
+    {
+        # cmd.exe builtins read-only / info
+        "dir", "type", "where", "findstr", "find", "more", "tree",
+        "echo", "ver", "vol", "set", "path", "title", "cd", "pwd",
+        "hostname", "whoami", "tasklist", "systeminfo", "time", "date",
+        "fc", "comp",
+        # PowerShell cmdlets read-only / info
+        "Get-ChildItem", "Get-Content", "Get-Item", "Get-Location",
+        "Get-Process", "Get-Service", "Get-Date", "Get-Host",
+        "Get-Command", "Get-Help", "Get-Member", "Get-Module",
+        "Get-Variable", "Get-PSDrive", "Get-ComputerInfo",
+        "Select-String", "Select-Object", "Where-Object", "ForEach-Object",
+        "Measure-Object", "Sort-Object", "Group-Object", "Format-Table",
+        "Format-List", "Out-String", "Out-Default",
+        "Test-Path", "Resolve-Path", "Split-Path", "Join-Path",
+        "Convert-Path", "ConvertTo-Json", "ConvertFrom-Json",
+        # Networking info
+        "ipconfig", "ping", "nslookup", "tracert", "pathping", "netstat",
+        "Test-Connection", "Test-NetConnection",
+        # Dev tools (mesmos do Unix — sao executaveis cross-platform)
+        "python", "python3", "py", "node", "npm", "npx", "yarn", "pnpm",
+        "bun", "pip", "pip3", "pytest", "vitest", "jest",
+        "ruff", "eslint", "prettier", "mypy", "tsc",
+        "cargo", "go", "rustc", "javac", "java", "mvn", "gradle",
+        # Version control
+        "git",
+        # NOTA: `cmd`, `powershell`, `pwsh` ficam DE FORA — mesmo motivo
+        # de `bash -c` exigir aprovacao no Unix. shell_tools.py ja envolve
+        # comandos com `cmd /c` por baixo dos panos.
+    }
+)
+
+
+# Case-insensitive lookup pra Windows: cmdlets e builtins do cmd nao
+# distinguem caixa (`Get-ChildItem` vs `get-childitem` vs `DIR`).
+_SAFE_SHELL_COMMANDS_WIN_LOWER = frozenset(c.lower() for c in SAFE_SHELL_COMMANDS_WIN)
+
 # Dangerous operators (subshells, redirection, variable expansion)
 # Pipes (|) are allowed if all commands in the pipeline are safe
 _DANGEROUS_OPS = re.compile(r"[;&`<>\n\r]|\$\(|&&|\|\||\$\{")
@@ -139,6 +181,13 @@ _INTERPRETER_EVAL_FLAGS = {
     "sh":      frozenset({"-c"}),
     "zsh":     frozenset({"-c"}),
     "deno":    frozenset({"eval"}),
+    # Windows shells — qualquer flag de eval inline exige aprovacao
+    # humana, mesma logica de `bash -c` no Unix.
+    "cmd":        frozenset({"/c", "/C", "/k", "/K"}),
+    "powershell": frozenset({"-c", "-C", "-Command", "-command",
+                             "-EncodedCommand", "-encodedcommand"}),
+    "pwsh":       frozenset({"-c", "-C", "-Command", "-command",
+                             "-EncodedCommand", "-encodedcommand"}),
 }
 
 # Git actions considered read-only (safe for auto-approval)
@@ -200,9 +249,17 @@ def _is_single_command_safe(cmd_str: str) -> bool:
         if not parts:
             return False
 
-        base_cmd = Path(parts[0]).name
-        if base_cmd not in SAFE_SHELL_COMMANDS:
-            return False
+        if IS_WINDOWS:
+            # `Path.stem` strips a extensao (.exe/.cmd/.bat/.ps1) e .lower()
+            # bate com `_SAFE_SHELL_COMMANDS_WIN_LOWER` — cmdlets/builtins
+            # do Windows sao case-insensitive.
+            base_cmd = Path(parts[0]).stem.lower()
+            if base_cmd not in _SAFE_SHELL_COMMANDS_WIN_LOWER:
+                return False
+        else:
+            base_cmd = Path(parts[0]).name
+            if base_cmd not in SAFE_SHELL_COMMANDS:
+                return False
 
         # Check per-command dangerous args (V-001: check each arg individually)
         if base_cmd in _DANGEROUS_ARGS:

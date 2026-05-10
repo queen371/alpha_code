@@ -35,12 +35,36 @@ from alpha.mcp import load_mcp_servers
 from alpha.skills import inject_skill_index, load_all_skills
 
 
+_WINDOWS_PROMPT_ADDENDUM = """
+# Platform: Windows
+
+You are running on Windows. The `execute_shell` tool routes commands through `cmd.exe /c`, so cmd builtins (`dir`, `type`, `echo`, `where`, `findstr`, `more`, `tree`) and PowerShell cmdlets (`Get-ChildItem`, `Get-Content`, `Select-String`, `Test-Path`) work — but Unix-only commands (`ls`, `cat`, `grep`, `which`, `rm`, `mv`, `cp`, `find`, `head`, `tail`, `wc`) do NOT.
+
+Translation table you should use:
+- `ls -la` → `dir` (or `Get-ChildItem -Force` in PowerShell)
+- `cat file.txt` → `type file.txt` (or `Get-Content file.txt`)
+- `grep pattern file` → `findstr pattern file` (or `Select-String pattern file`)
+- `which python` → `where python`
+- `rm file` → `del file` (use the `delete_file`/`edit_file` tool instead when possible)
+- `mv a b` → `move a b`
+- `cp a b` → `copy a b`
+- `head -n 10 file` → `Get-Content file -TotalCount 10`
+- `find . -name '*.py'` → `Get-ChildItem -Recurse -Filter *.py`
+- Path separators: prefer forward slashes inside command args (cmd accepts both); use backslashes only when explicitly required.
+
+For file reads/writes/edits, prefer the dedicated tools (`read_file`, `write_file`, `edit_file`, `search_files`, `glob_files`) — they are platform-agnostic and avoid shell quirks entirely.
+"""
+
+
 def build_system_prompt(agent: AgentScope | None = None) -> str:
     """Load base prompt, apply agent extras, inject skill index, append ALPHA.md."""
+    from alpha._platform import IS_WINDOWS
     from alpha.project_context import inject_project_context, load_project_context
 
     load_all_skills()
     base = load_system_prompt()
+    if IS_WINDOWS:
+        base = f"{base}\n{_WINDOWS_PROMPT_ADDENDUM}"
     if agent is not None and agent.system_prompt_extra:
         base = f"{base}\n\n# AGENT PROFILE: {agent.name}\n{agent.system_prompt_extra}"
     skill_filter = (

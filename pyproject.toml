@@ -16,6 +16,10 @@ dependencies = [
     "prompt_toolkit>=3.0,<4.0",
     # Pin transitive: lxml < 6.1.0 e vulneravel a CVE-2026-41066 (XXE/local file read)
     "lxml>=6.1.0,<7.0",
+    # Windows-only: traduz ANSI escapes pra Win32 console API (cores e
+    # animacoes funcionam em PowerShell/cmd). No-op em Linux/macOS — o
+    # marker sys_platform garante que pip nem instala fora do Windows.
+    "colorama>=0.4,<1.0; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
