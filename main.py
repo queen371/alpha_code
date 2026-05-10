@@ -118,10 +118,20 @@ async def _run_once(messages, user_message, provider, temperature, get_tool_fn, 
                 indicator.start("Think")
 
             elif event_type == "done":
+                used_inline_spinner = (
+                    getattr(indicator, "_enabled", False)
+                    and not getattr(indicator, "_scroll_active", False)
+                )
                 indicator.stop()
                 reply = event.get("reply", "")
-                if reply and not full_reply:
-                    full_reply = reply
+                if reply:
+                    if not full_reply:
+                        sys.stdout.write(reply)
+                        sys.stdout.flush()
+                        full_reply = reply
+                    elif used_inline_spinner:
+                        sys.stdout.write(reply)
+                        sys.stdout.flush()
 
             elif event_type == "error":
                 indicator.stop()
